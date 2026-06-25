@@ -385,7 +385,7 @@ async function viewFichaAlumno(v) {
         <h3 style="margin:0;flex:1">Observaciones (${obs.length})</h3>
         ${esCoord ? `<button class="btn agua sm no-print" id="btn-nueva-obs">＋ Nueva</button>` : ""}
       </div>
-      ${obs.length ? `<table class="tbl"><thead><tr><th>#</th><th>Fecha</th><th>NL/PL/L</th><th>%</th><th class="no-print"></th></tr></thead><tbody>${filasObs}</tbody></table>`
+      ${obs.length ? `<div class="tabla-scroll"><table class="tbl"><thead><tr><th>#</th><th>Fecha</th><th>NL/PL/L</th><th>%</th><th class="no-print"></th></tr></thead><tbody>${filasObs}</tbody></table></div>`
         : `<p class="muted">Todavía no hay observaciones. ${esCoord ? "Cargá la primera para fijar la línea de base." : ""}</p>`}
     </div>
 
@@ -586,7 +586,7 @@ async function viewTablero(v) {
 
     <div class="card">
       <h3>Por sede / coordinador</h3>
-      <table class="tbl">
+      <div class="tabla-scroll"><table class="tbl">
         <thead><tr><th>Sede</th><th>Coordinador</th><th>Alumnos</th><th>Eval.</th><th>Aprob.</th><th>Meta ${m.sedeAprob}</th></tr></thead>
         <tbody>
         ${porSede.map((p) => `<tr>
@@ -600,7 +600,7 @@ async function viewTablero(v) {
               : `<span class="badge proc">faltan ${Math.max(0, m.sedeAprob - p.aprob)}</span>`}</td>
         </tr>`).join("")}
         </tbody>
-      </table>
+      </table></div>
     </div>`;
 
   $("#t-trim").addEventListener("change", (e) => {
@@ -624,7 +624,7 @@ async function viewConfig(v) {
         <button class="btn agua sm" id="btn-nuevo-trim">＋ Nuevo trimestre</button>
       </div>
       <p class="small muted">Cada trimestre define el período, las observaciones a realizar, las sedes involucradas y el objetivo (alumnos y mínimo de aprobados).</p>
-      ${state.trimestres.length ? `<table class="tbl">
+      ${state.trimestres.length ? `<div class="tabla-scroll"><table class="tbl">
         <thead><tr><th>Nombre</th><th>Período</th><th>Sedes</th><th>Meta</th><th>Estado</th><th></th></tr></thead>
         <tbody>
         ${state.trimestres.map((t) => `<tr>
@@ -639,7 +639,7 @@ async function viewConfig(v) {
             <button class="btn ghost sm" data-borrar-trim="${t.id}" style="color:var(--rojo)">🗑</button>
           </td>
         </tr>`).join("")}
-        </tbody></table>`
+        </tbody></table></div>`
         : `<p class="muted">No hay trimestres creados todavía. Creá el primero para empezar a evaluar con metas.</p>`}
     </div>
 

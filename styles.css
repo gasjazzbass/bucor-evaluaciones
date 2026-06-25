@@ -26,7 +26,7 @@
   --font-logo:"BN Pooly Rounded", "Correntino", sans-serif;
 }
 *{box-sizing:border-box}
-html,body{margin:0;padding:0}
+html,body{margin:0;padding:0;overflow-x:hidden;width:100%;max-width:100%}
 body{
   font-family:var(--font-ui);
   background:var(--bg); color:var(--tinta); font-size:16px; line-height:1.45;
@@ -173,6 +173,9 @@ table.tbl{width:100%; border-collapse:collapse; font-size:.9rem}
 table.tbl th,table.tbl td{padding:9px 8px; border-bottom:1px solid var(--borde); text-align:left}
 table.tbl th{color:var(--gris); font-size:.78rem; text-transform:uppercase; letter-spacing:.3px}
 table.tbl tr:hover td{background:var(--gris-cl)}
+/* Las tablas anchas scrollean dentro de su contenedor, sin romper la página */
+.tabla-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -4px}
+.tabla-scroll table.tbl{min-width:480px}
 
 /* ---------- Toast ---------- */
 #toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
@@ -187,6 +190,22 @@ table.tbl tr:hover td{background:var(--gris-cl)}
 .modal{background:#fff; width:min(560px,96vw); max-height:92vh; overflow:auto; border-radius:14px; padding:20px}
 .modal h3{margin-top:0}
 .modal-actions{display:flex; gap:10px; justify-content:flex-end; margin-top:16px}
+
+/* ---------- Responsive (celular) ---------- */
+@media (max-width:560px){
+  .wrap{padding:12px}
+  /* los KPIs y campos en fila se acomodan de a 2 (o uno) por fila */
+  .row > *{flex:1 1 140px}
+  .appbar{padding:10px 12px; gap:8px}
+  .appbar .brand{font-size:1.4rem}
+  .appbar .brand small{font-size:.55rem}
+  .appbar .who{font-size:.72rem}
+  .tabs button{font-size:.82rem; padding:9px 4px}
+  .kpi .n{font-size:1.5rem}
+}
+@media (max-width:380px){
+  .appbar .brand small{display:none}
+}
 
 /* ---------- Print (PDF) ---------- */
 @media print{
