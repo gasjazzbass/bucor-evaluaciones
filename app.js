@@ -88,6 +88,22 @@ function badgeEstado(row) {
   return `<span class="badge proc">En proceso</span>`;
 }
 
+/* ---------- verificación por video ---------- */
+const MAX_VIDEO = 50 * 1024 * 1024; // 50 MB
+
+function badgeVerif(estado) {
+  if (estado === "verificado") return `<span class="badge ok">📹 Verificado</span>`;
+  if (estado === "pendiente")  return `<span class="badge proc">📹 A verificar</span>`;
+  if (estado === "rechazado")  return `<span class="badge" style="background:var(--rojo-bg);color:var(--rojo)">📹 Rechazado</span>`;
+  return `<span class="badge sin">📹 Falta video</span>`; // aprobado sin verificación cargada
+}
+
+async function urlFirmada(path) {
+  if (!path) return null;
+  const { data } = await supa.storage.from("verificaciones").createSignedUrl(path, 3600);
+  return data?.signedUrl || null;
+}
+
 /* ============================================================
    AUTENTICACIÓN
    ============================================================ */
@@ -163,7 +179,7 @@ function mostrarApp() {
    ============================================================ */
 function tabsParaRol() {
   return state.profile.rol === "admin"
-    ? [["tablero", "📊 Tablero"], ["alumnos", "🏊 Alumnos"], ["config", "⚙️ Administración"]]
+    ? [["tablero", "📊 Tablero"], ["alumnos", "🏊 Alumnos"], ["verificaciones", "📹 Verif."], ["config", "⚙️ Admin."]]
     : [["alumnos", "🏊 Mis alumnos"]];
 }
 function construirTabs() {
@@ -189,6 +205,7 @@ async function render() {
     else if (state.route === "alumno")  await viewFichaAlumno(v);
     else if (state.route === "nueva-obs") await viewNuevaObs(v);
     else if (state.route === "tablero") await viewTablero(v);
+    else if (state.route === "verificaciones") await viewVerificaciones(v);
     else if (state.route === "config")  await viewConfig(v);
   } catch (err) {
     console.error(err);
@@ -219,6 +236,10 @@ async function viewAlumnos(v) {
   if (selTrim) q = q.eq("trimestre_id", selTrim.id);
   const { data: rows, error } = await q;
   if (error) throw error;
+
+  // estado de verificación por alumno (para el indicador de la lista)
+  const { data: verifs } = await supa.from("verificaciones").select("alumno_id,estado");
+  const vmap = {}; (verifs || []).forEach((x) => (vmap[x.alumno_id] = x.estado));
 
   const aprob = rows.filter((r) => r.aprobado).length;
   const evaluados = rows.filter((r) => r.n_obs > 0).length;
@@ -270,7 +291,7 @@ async function viewAlumnos(v) {
         <div class="ava">${esc(iniciales(r.nombre))}</div>
         <div class="info">
           <b>${esc(r.nombre)}</b>
-          <div class="small muted">${esAdmin ? esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}</div>
+          <div class="small muted">${esAdmin ? esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}${r.aprobado ? " " + badgeVerif(vmap[r.alumno_id]) : ""}</div>
           <div class="bar ${okBar}"><i style="width:${pct ?? 0}%"></i></div>
         </div>
         <div class="pct"><div class="n">${pct === null ? "—" : pct + "%"}</div>
@@ -342,6 +363,15 @@ async function viewFichaAlumno(v) {
   const est = estadoDeObservaciones(obs);
   const esCoord = state.profile.rol === "coordinador";
 
+  // Verificación por video (solo cuando el alumno está aprobado)
+  let verif = null, url1 = null, url2 = null;
+  if (est.aprobado) {
+    const { data } = await supa.from("verificaciones").select("*").eq("alumno_id", id).maybeSingle();
+    verif = data || null;
+    if (verif) [url1, url2] = await Promise.all([urlFirmada(verif.video1_path), urlFirmada(verif.video2_path)]);
+  }
+  const verifCard = est.aprobado ? htmlVerificacion({ verif, esCoord, url1, url2 }) : "";
+
   const filasObs = obs.map((o, i) => {
     const r = resumenMarcas(o.items);
     const objOk = est.objetivo != null && i > 0 && Number(o.porcentaje) >= est.objetivo;
@@ -379,6 +409,8 @@ async function viewFichaAlumno(v) {
         <div class="kpi ${est.aprobado ? "good" : ""}"><div class="n">${est.mejorPost ?? "—"}${est.mejorPost != null ? "%" : ""}</div><div class="l">Mejor posterior</div></div>
       </div>
     </div>
+
+    ${verifCard}
 
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -428,6 +460,90 @@ async function viewFichaAlumno(v) {
           cerrarModal(); toast("Observación eliminada", "ok"); render();
         });
     }));
+
+  if (est.aprobado) wireVerificacion(id, verif, esCoord);
+}
+
+/* ---------- verificación: HTML + eventos ---------- */
+function htmlVerificacion({ verif, esCoord, url1, url2 }) {
+  const estado = verif?.estado;
+  const borde = estado === "verificado" ? "var(--verde)" : estado === "pendiente" ? "var(--amarillo)"
+    : estado === "rechazado" ? "var(--rojo)" : "var(--bucor)";
+  const videos = (url1 || url2) ? `<div class="row" style="margin-top:8px">
+    ${url1 ? `<video src="${url1}" controls preload="metadata" style="width:100%;border-radius:10px;background:#000"></video>` : `<div class="kpi muted">Falta video 1</div>`}
+    ${url2 ? `<video src="${url2}" controls preload="metadata" style="width:100%;border-radius:10px;background:#000"></video>` : `<div class="kpi muted">Falta video 2</div>`}
+  </div>` : "";
+
+  let cuerpo;
+  if (esCoord) {
+    cuerpo = estado === "verificado"
+      ? `<p class="small muted">✔ El administrador verificó los videos. ¡Trámite completo!</p>`
+      : `${estado === "rechazado" && verif?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(verif.comentario)}</b></p>` : ""}
+         <p class="small muted">El alumno alcanzó el objetivo. Subí <b>2 videos cortos</b> (máx. 50 MB c/u) donde se lo vea nadando, para que el administrador verifique.</p>
+         <label class="field"><span>Video 1</span><input type="file" id="vid1" accept="video/*"></label>
+         <label class="field"><span>Video 2</span><input type="file" id="vid2" accept="video/*"></label>
+         <button class="btn primary no-print" id="btn-subir-videos">${verif ? "Reemplazar videos" : "Subir videos"}</button>`;
+  } else { // admin
+    cuerpo = !verif
+      ? `<p class="muted">El coordinador todavía no subió los videos.</p>`
+      : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="verif-coment">${esc(verif.comentario || "")}</textarea></label>
+         <div class="row no-print">
+           <button class="btn primary" id="btn-verificar">✔ Verificar</button>
+           <button class="btn danger" id="btn-rechazar">✖ Rechazar</button>
+         </div>`;
+  }
+
+  return `<div class="card" style="border:2px solid ${borde}">
+    <div style="display:flex;align-items:center;gap:10px">
+      <h3 style="margin:0;flex:1">📹 Verificación por video</h3>
+      ${badgeVerif(estado)}
+    </div>
+    ${videos}
+    ${cuerpo}
+  </div>`;
+}
+
+function wireVerificacion(id, verif, esCoord) {
+  if (esCoord) {
+    $("#btn-subir-videos")?.addEventListener("click", async () => {
+      const f1 = $("#vid1").files[0], f2 = $("#vid2").files[0];
+      if (!f1 || !f2) { toast("Tenés que elegir los 2 videos", "err"); return; }
+      if (f1.size > MAX_VIDEO || f2.size > MAX_VIDEO) { toast("Cada video debe pesar menos de 50 MB", "err"); return; }
+      const btn = $("#btn-subir-videos"); btn.disabled = true; btn.textContent = "Subiendo…";
+      try {
+        const sube = async (file, n) => {
+          const ext = (file.name.split(".").pop() || "mp4").toLowerCase();
+          const path = `alumno_${id}/video${n}_${Date.now()}.${ext}`;
+          const { error } = await supa.storage.from("verificaciones").upload(path, file, { upsert: true, contentType: file.type || "video/mp4" });
+          if (error) throw error;
+          return path;
+        };
+        const p1 = await sube(f1, 1), p2 = await sube(f2, 2);
+        const { error } = await supa.from("verificaciones").upsert({
+          alumno_id: id, video1_path: p1, video2_path: p2, estado: "pendiente",
+          subido_por: state.profile.id, subido_en: new Date().toISOString(),
+          comentario: null, revisado_por: null, revisado_en: null,
+        });
+        if (error) throw error;
+        toast("Videos enviados para verificación", "ok"); render();
+      } catch (err) {
+        toast("Error al subir: " + (err.message || err), "err");
+        btn.disabled = false; btn.textContent = "Subir videos";
+      }
+    });
+  } else {
+    const revisar = async (estado) => {
+      const comentario = $("#verif-coment")?.value.trim() || null;
+      if (estado === "rechazado" && !comentario) { toast("Escribí un motivo para el rechazo", "err"); return; }
+      const { error } = await supa.from("verificaciones").update({
+        estado, comentario, revisado_por: state.profile.id, revisado_en: new Date().toISOString(),
+      }).eq("alumno_id", id);
+      if (error) { toast(error.message, "err"); return; }
+      toast(estado === "verificado" ? "Verificación aprobada ✔" : "Videos rechazados", "ok"); render();
+    };
+    $("#btn-verificar")?.addEventListener("click", () => revisar("verificado"));
+    $("#btn-rechazar")?.addEventListener("click", () => revisar("rechazado"));
+  }
 }
 
 function modalVerObs(o) {
@@ -607,6 +723,43 @@ async function viewTablero(v) {
     state.trimestreSel = state.trimestres.find((t) => String(t.id) === e.target.value) || null;
     render();
   });
+}
+
+/* ============================================================
+   VISTA: VERIFICACIONES (admin)
+   ============================================================ */
+async function viewVerificaciones(v) {
+  const { data, error } = await supa.from("verificaciones")
+    .select("alumno_id, estado, subido_en, alumnos(nombre, sede_id)")
+    .order("subido_en", { ascending: true });
+  if (error) throw error;
+  const all = data || [];
+  const pend = all.filter((x) => x.estado === "pendiente");
+  const okN = all.filter((x) => x.estado === "verificado").length;
+  const rechN = all.filter((x) => x.estado === "rechazado").length;
+
+  const fila = (x) => `<div class="alumno" data-id="${x.alumno_id}">
+    <div class="ava">${esc(iniciales(x.alumnos?.nombre))}</div>
+    <div class="info"><b>${esc(x.alumnos?.nombre || "—")}</b>
+      <div class="small muted">${esc(sedeNombre(x.alumnos?.sede_id))} · enviado ${fmtFecha((x.subido_en || "").slice(0, 10))}</div></div>
+    <button class="btn agua sm">Revisar →</button>
+  </div>`;
+
+  v.innerHTML = `
+    <div class="card">
+      <div class="row" style="text-align:center">
+        <div class="kpi ${pend.length ? "warn" : ""}"><div class="n">${pend.length}</div><div class="l">A verificar</div></div>
+        <div class="kpi good"><div class="n">${okN}</div><div class="l">Verificados</div></div>
+        <div class="kpi"><div class="n">${rechN}</div><div class="l">Rechazados</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Pendientes de verificación</h3>
+      ${pend.length ? pend.map(fila).join("") : `<p class="muted">No hay videos pendientes de verificar. 🎉</p>`}
+    </div>`;
+
+  v.querySelectorAll(".alumno").forEach((el) =>
+    el.addEventListener("click", () => navegar("alumno", { alumnoId: Number(el.dataset.id) })));
 }
 
 /* ============================================================
