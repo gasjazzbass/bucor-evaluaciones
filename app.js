@@ -18,6 +18,7 @@ const state = {
   tsedes: [],        // [{trimestre_id, sede_id}] — sedes involucradas por trimestre
   trimestreActivo: null,
   trimestreSel: null,  // trimestre seleccionado en vistas de admin
+  notifs: [],        // notificaciones del usuario
   route: null,       // ruta actual
   alumnoId: null,    // ficha abierta
 };
@@ -119,7 +120,16 @@ $("#form-login").addEventListener("submit", async (e) => {
   if (error) { msg.textContent = "Email o contraseña incorrectos."; }
 });
 
+$("#btn-google").addEventListener("click", async () => {
+  const { error } = await supa.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: window.location.origin + window.location.pathname },
+  });
+  if (error) { $("#login-msg").textContent = "No se pudo iniciar con Google: " + error.message; }
+});
+
 $("#btn-logout").addEventListener("click", async () => { await supa.auth.signOut(); });
+$("#btn-notif").addEventListener("click", modalNotificaciones);
 
 supa.auth.onAuthStateChange((_evt, session) => { arrancar(session); });
 supa.auth.getSession().then(({ data }) => arrancar(data.session));
@@ -161,6 +171,7 @@ function mostrarLogin() {
   $("#screen-app").classList.add("hidden");
   $("#screen-login").classList.remove("hidden");
   $("#form-login").reset();
+  clearInterval(notifTimer);
 }
 
 function mostrarApp() {
@@ -172,6 +183,77 @@ function mostrarApp() {
   construirTabs();
   const inicio = state.profile.rol === "admin" ? "tablero" : "alumnos";
   navegar(inicio);
+  // Notificaciones: carga inicial + refresco cada 60s
+  cargarNotificaciones();
+  clearInterval(notifTimer);
+  notifTimer = setInterval(cargarNotificaciones, 60000);
+}
+
+/* ============================================================
+   NOTIFICACIONES (campanita)
+   ============================================================ */
+let notifTimer = null;
+
+async function cargarNotificaciones() {
+  if (!state.profile) return;
+  const { data } = await supa.from("notificaciones").select("*")
+    .eq("destinatario_id", state.profile.id).order("creada", { ascending: false }).limit(50);
+  state.notifs = data || [];
+  pintarCampana();
+}
+
+function pintarCampana() {
+  const el = $("#notif-count");
+  if (!el) return;
+  const n = state.notifs.filter((x) => !x.leida).length;
+  if (n > 0) { el.textContent = n > 99 ? "99+" : n; el.classList.remove("hidden"); }
+  else el.classList.add("hidden");
+}
+
+function fmtCuando(ts) {
+  if (!ts) return "";
+  const d = new Date(ts), p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function modalNotificaciones() {
+  const items = state.notifs;
+  const lista = items.length ? items.map((x) => `
+    <div class="notif-item ${x.leida ? "" : "no-leida"}" data-id="${x.id}" ${x.alumno_id ? `data-alumno="${x.alumno_id}"` : ""}>
+      <div class="notif-msg">${esc(x.mensaje)}</div>
+      <div class="small muted">${fmtCuando(x.creada)}</div>
+    </div>`).join("") : `<p class="muted">No tenés notificaciones.</p>`;
+  abrirModal(`
+    <div style="display:flex;align-items:center;gap:10px">
+      <h3 style="margin:0;flex:1">Notificaciones</h3>
+      ${items.some((x) => !x.leida) ? `<button class="btn ghost sm" id="notif-todas">Marcar leídas</button>` : ""}
+    </div>
+    <div id="notif-lista" style="margin-top:10px">${lista}</div>
+    <div class="modal-actions"><button class="btn primary" id="notif-cerrar">Cerrar</button></div>`);
+  $("#notif-cerrar").addEventListener("click", cerrarModal);
+  $("#notif-todas")?.addEventListener("click", async () => { await marcarLeidas(); cerrarModal(); });
+  $("#notif-lista").querySelectorAll(".notif-item").forEach((el) => el.addEventListener("click", async () => {
+    await marcarUnaLeida(Number(el.dataset.id));
+    const alumnoId = el.dataset.alumno ? Number(el.dataset.alumno) : null;
+    cerrarModal();
+    if (alumnoId) navegar("alumno", { alumnoId });
+  }));
+}
+
+async function marcarLeidas() {
+  const ids = state.notifs.filter((x) => !x.leida).map((x) => x.id);
+  if (!ids.length) return;
+  await supa.from("notificaciones").update({ leida: true }).in("id", ids);
+  state.notifs.forEach((x) => (x.leida = true));
+  pintarCampana();
+}
+
+async function marcarUnaLeida(id) {
+  const n = state.notifs.find((x) => x.id === id);
+  if (n && !n.leida) {
+    await supa.from("notificaciones").update({ leida: true }).eq("id", id);
+    n.leida = true; pintarCampana();
+  }
 }
 
 /* ============================================================
