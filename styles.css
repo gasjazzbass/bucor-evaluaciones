@@ -25,25 +25,40 @@
   --font-head:"Correntino", "Geist", system-ui, sans-serif;
   --font-logo:"BN Pooly Rounded", "Correntino", sans-serif;
 }
-*{box-sizing:border-box}
-html,body{margin:0;padding:0}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+html,body{margin:0;padding:0;width:100%;max-width:100%}
 body{
   font-family:var(--font-ui);
   background:var(--bg); color:var(--tinta); font-size:16px; line-height:1.45;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  padding-bottom:env(safe-area-inset-bottom);
+  overflow-x:clip;  /* evita desborde horizontal SIN romper el scroll vertical (a diferencia de hidden) */
 }
 h1,h2,h3,h4,.card h2,.card h3{font-family:var(--font-head); letter-spacing:.1px}
 .hidden{display:none !important}
 
-/* ---------- App bar ---------- */
+/* Transiciones suaves estilo iOS — solo en elementos interactivos */
+.btn,.tabs button,.alumno,.opt,input,select,textarea{
+  transition:background-color .2s ease, border-color .2s ease, box-shadow .2s ease,
+    color .2s ease, transform .15s ease;
+}
+.btn:active,.opt:active{ transform:scale(.96); }
+@media (prefers-reduced-motion:reduce){ *{transition:none !important; animation:none !important} }
+
+/* ---------- App bar (blur estilo iOS + safe-area) ---------- */
 .appbar{
   position:sticky; top:0; z-index:20;
   background:linear-gradient(100deg,var(--agua-osc),var(--azul));
-  color:#fff; padding:12px 16px; display:flex; align-items:center; gap:12px;
-  box-shadow:var(--sombra);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+  backdrop-filter:saturate(180%) blur(20px);
+  color:#fff; padding:calc(env(safe-area-inset-top) + 12px) 16px 12px; display:flex; align-items:center; gap:12px;
+  box-shadow:0 1px 0 rgba(255,255,255,.08), var(--sombra);
 }
-.appbar .brand{font-family:var(--font-logo); font-weight:normal; font-size:1.7rem; line-height:.9; text-transform:lowercase}
+.appbar .brand{font-family:var(--font-logo); font-weight:normal; font-size:1.7rem; line-height:.9; text-transform:lowercase; display:flex; align-items:center; gap:8px}
 .appbar .brand small{display:block; font-family:var(--font-ui); font-weight:400; opacity:.9; font-size:.6rem; letter-spacing:.4px; text-transform:uppercase; margin-top:3px}
-.appbar .brand img{height:30px; vertical-align:middle; margin-right:4px}
+.appbar .brand img{height:30px; vertical-align:middle}
+.appbar .brand .logo-marca{height:26px; width:auto; display:block}
 .appbar .spacer{flex:1}
 .appbar .who{font-size:.82rem; text-align:right; opacity:.95}
 .appbar .who b{display:block}
@@ -53,13 +68,13 @@ h1,h2,h3,h4,.card h2,.card h3{font-family:var(--font-head); letter-spacing:.1px}
 .row{display:flex; gap:12px; flex-wrap:wrap}
 .row > *{flex:1; min-width:0}
 
-/* ---------- Tabs ---------- */
-.tabs{display:flex; gap:6px; margin:0 auto; max-width:920px; padding:10px 16px 0}
+/* ---------- Tabs (segmented control estilo iOS) ---------- */
+.tabs{display:flex; gap:4px; margin:10px auto 0; max-width:920px; padding:0 16px 10px}
 .tabs button{
-  flex:1; border:0; background:transparent; padding:10px 8px; cursor:pointer;
-  font-weight:600; color:var(--gris); border-bottom:3px solid transparent; font-size:.92rem;
+  flex:1; border:0; background:transparent; padding:9px 8px; cursor:pointer;
+  font-weight:600; color:var(--gris); border-radius:10px; font-size:.88rem;
 }
-.tabs button.active{color:var(--azul); border-bottom-color:var(--azul)}
+.tabs button.active{color:#fff; background:var(--azul); box-shadow:0 2px 8px rgba(14,30,53,.25)}
 
 /* ---------- Cards ---------- */
 .card{background:var(--card); border:1px solid var(--borde); border-radius:var(--radio);
@@ -68,9 +83,9 @@ h1,h2,h3,h4,.card h2,.card h3{font-family:var(--font-head); letter-spacing:.1px}
 .muted{color:var(--gris)}
 .small{font-size:.84rem}
 
-/* ---------- Buttons ---------- */
+/* ---------- Buttons (pill, estilo iOS) ---------- */
 .btn{display:inline-flex; align-items:center; justify-content:center; gap:8px;
-  border:0; border-radius:10px; padding:11px 16px; font-size:.95rem; font-weight:600;
+  border:0; border-radius:980px; padding:11px 18px; font-size:.95rem; font-weight:600;
   cursor:pointer; background:var(--gris-cl); color:var(--tinta); text-decoration:none}
 .btn:hover{filter:brightness(.97)}
 .btn.primary{background:var(--azul); color:#fff}
@@ -78,29 +93,29 @@ h1,h2,h3,h4,.card h2,.card h3{font-family:var(--font-head); letter-spacing:.1px}
 .btn.ghost{background:transparent; border:1px solid var(--borde)}
 .btn.danger{background:var(--rojo); color:#fff}
 .btn.block{width:100%}
-.btn.sm{padding:7px 12px; font-size:.85rem}
+.btn.sm{padding:7px 14px; font-size:.85rem; border-radius:980px}
 .btn:disabled{opacity:.5; cursor:not-allowed}
 
-/* ---------- Inputs ---------- */
+/* ---------- Inputs (estilo iOS: fondo gris suave, sin borde duro) ---------- */
 label.field{display:block; margin-bottom:12px}
 label.field span{display:block; font-size:.82rem; color:var(--gris); margin-bottom:4px; font-weight:600}
 input,select,textarea{
-  width:100%; padding:11px 12px; border:1px solid var(--borde); border-radius:10px;
-  font-size:1rem; background:#fff; color:var(--tinta)}
+  width:100%; padding:12px 14px; border:1px solid transparent; border-radius:12px;
+  font-size:1rem; background:var(--gris-cl); color:var(--tinta)}
 textarea{min-height:80px; resize:vertical}
-input:focus,select:focus,textarea:focus{outline:2px solid var(--celeste); border-color:var(--azul)}
+input:focus,select:focus,textarea:focus{outline:none; background:#fff; border-color:var(--azul); box-shadow:0 0 0 4px var(--celeste)}
 
 /* ---------- Login ---------- */
 .login-bg{min-height:100vh; display:grid; place-items:center;
-  background:linear-gradient(160deg,var(--agua-osc),var(--azul))}
-.login-card{background:#fff; width:min(380px,92vw); border-radius:16px; padding:28px;
-  box-shadow:0 12px 40px rgba(0,0,0,.25)}
-.login-card .logo{font-size:2.2rem; text-align:center}
+  background:linear-gradient(160deg,var(--agua-osc),var(--azul)); padding:16px;
+  padding-top:calc(env(safe-area-inset-top) + 16px); padding-bottom:calc(env(safe-area-inset-bottom) + 16px)}
+.login-card{background:rgba(255,255,255,.92); -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px);
+  width:min(380px,92vw); border-radius:22px; padding:28px;
+  box-shadow:0 20px 60px rgba(0,0,0,.3); animation:subir .5s cubic-bezier(.25,.8,.25,1)}
+@keyframes subir{from{transform:translateY(16px); opacity:0} to{transform:translateY(0); opacity:1}}
 .login-card .mascota{display:block; width:118px; margin:4px auto 2px}
-.wordmark{font-family:var(--font-logo); color:var(--bucor); line-height:1; text-transform:lowercase; font-weight:normal}
-.login-card .wordmark{font-size:3.2rem; text-align:center; margin:2px 0}
-.login-card h1{text-align:center; margin:.2em 0 .1em; font-size:1.15rem; color:var(--oxford)}
-.login-card p.sub{text-align:center; color:var(--gris); margin:0 0 18px; font-size:.86rem}
+.login-card .logo-login{display:block; width:min(240px,72%); margin:8px auto 4px}
+.login-card h1{text-align:center; margin:.2em 0 20px; font-size:1.05rem; color:var(--gris); font-weight:400; font-family:var(--font-ui)}
 
 /* ---------- Badges / chips ---------- */
 .badge{display:inline-block; padding:3px 10px; border-radius:999px; font-size:.76rem; font-weight:700}
@@ -112,7 +127,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--celeste); border
 
 /* ---------- Alumno list items ---------- */
 .alumno{display:flex; align-items:center; gap:12px; padding:12px; border:1px solid var(--borde);
-  border-radius:12px; margin-bottom:10px; background:#fff; cursor:pointer}
+  border-radius:14px; margin-bottom:10px; background:#fff; cursor:pointer}
 .alumno:hover{border-color:var(--azul)}
 .alumno .ava{width:42px; height:42px; border-radius:50%; background:var(--celeste); color:var(--azul-osc);
   display:grid; place-items:center; font-weight:700; flex:none}
@@ -173,20 +188,44 @@ table.tbl{width:100%; border-collapse:collapse; font-size:.9rem}
 table.tbl th,table.tbl td{padding:9px 8px; border-bottom:1px solid var(--borde); text-align:left}
 table.tbl th{color:var(--gris); font-size:.78rem; text-transform:uppercase; letter-spacing:.3px}
 table.tbl tr:hover td{background:var(--gris-cl)}
+/* Las tablas anchas scrollean dentro de su contenedor, sin romper la página */
+.tabla-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -4px}
+.tabla-scroll table.tbl{min-width:480px}
 
 /* ---------- Toast ---------- */
-#toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
-  background:var(--tinta); color:#fff; padding:12px 18px; border-radius:10px; z-index:100;
-  box-shadow:0 6px 24px rgba(0,0,0,.3); font-size:.9rem; max-width:90vw; opacity:0; transition:opacity .2s}
-#toast.show{opacity:1}
-#toast.err{background:var(--rojo)}
-#toast.ok{background:var(--verde)}
+#toast{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom) + 24px); transform:translateX(-50%) translateY(8px);
+  background:rgba(14,30,53,.92); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+  color:#fff; padding:12px 20px; border-radius:980px; z-index:100;
+  box-shadow:0 6px 24px rgba(0,0,0,.3); font-size:.9rem; max-width:90vw;
+  opacity:0; transition:opacity .25s ease, transform .25s cubic-bezier(.25,.8,.25,1)}
+#toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+#toast.err{background:rgba(220,53,69,.95)}
+#toast.ok{background:rgba(21,115,71,.95)}
 
-/* ---------- Modal ---------- */
-.modal-bg{position:fixed; inset:0; background:rgba(0,0,0,.45); display:grid; place-items:center; z-index:50; padding:16px}
-.modal{background:#fff; width:min(560px,96vw); max-height:92vh; overflow:auto; border-radius:14px; padding:20px}
+/* ---------- Modal (estilo hoja / sheet de iOS) ---------- */
+.modal-bg{position:fixed; inset:0; background:rgba(14,30,53,.4); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
+  display:grid; place-items:center; z-index:50; padding:16px; animation:fade .2s ease}
+.modal{background:#fff; width:min(560px,96vw); max-height:92vh; overflow:auto; border-radius:20px; padding:22px;
+  box-shadow:0 24px 60px rgba(0,0,0,.35); animation:subir .28s cubic-bezier(.25,.8,.25,1)}
 .modal h3{margin-top:0}
 .modal-actions{display:flex; gap:10px; justify-content:flex-end; margin-top:16px}
+@keyframes fade{from{opacity:0} to{opacity:1}}
+
+/* ---------- Responsive (celular) ---------- */
+@media (max-width:560px){
+  .wrap{padding:12px}
+  /* los KPIs y campos en fila se acomodan de a 2 (o uno) por fila */
+  .row > *{flex:1 1 140px}
+  .appbar{padding:10px 12px; gap:8px}
+  .appbar .brand{font-size:1.4rem}
+  .appbar .brand small{font-size:.55rem}
+  .appbar .who{font-size:.72rem}
+  .tabs button{font-size:.82rem; padding:9px 4px}
+  .kpi .n{font-size:1.5rem}
+}
+@media (max-width:380px){
+  .appbar .brand small{display:none}
+}
 
 /* ---------- Print (PDF) ---------- */
 @media print{

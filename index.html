@@ -2,10 +2,23 @@
 <html lang="es-AR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>BUCOR · Evaluación de Natación</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <title>Bucor · Evaluación de Natación</title>
+  <meta name="description" content="Fundación Educativa y Deportiva Bucor — evaluación de aprendizaje en natación">
+
+  <!-- PWA: instalable como app autónoma -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0E1E35">
+  <meta name="mobile-web-app-capable" content="yes">
+  <!-- iOS: abrir en modo standalone (sin barra del navegador) con ícono propio -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Bucor">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
+
   <link rel="stylesheet" href="styles.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏊</text></svg>">
 </head>
 <body>
 
@@ -13,9 +26,8 @@
   <div id="screen-login" class="login-bg">
     <form id="form-login" class="login-card">
       <img class="mascota" src="img/mascota.png" alt="" onerror="this.remove()">
-      <div class="wordmark">bucor</div>
+      <img class="logo-login" src="img/logo-bucor-full.png" alt="Bucor · Fundación Educativa y Deportiva">
       <h1>Evaluación de Natación</h1>
-      <p class="sub">Fundación Educativa y Deportiva Bucor</p>
       <label class="field"><span>Email</span>
         <input type="email" id="login-email" autocomplete="username" required></label>
       <label class="field"><span>Contraseña</span>
@@ -28,7 +40,11 @@
   <!-- ===== APP ===== -->
   <div id="screen-app" class="hidden">
     <div class="appbar">
-      <div class="brand"><img src="img/mascota.png" alt="" onerror="this.remove()">bucor <small>Evaluación de Natación</small></div>
+      <div class="brand">
+        <img src="img/mascota.png" alt="" onerror="this.remove()">
+        <img class="logo-marca" src="img/logo-bucor-wordmark.png" alt="Bucor">
+        <small>Evaluación de Natación</small>
+      </div>
       <div class="spacer"></div>
       <div class="who"><b id="who-name">—</b><span id="who-role" class="small"></span></div>
       <button class="btn ghost sm" id="btn-logout" style="color:#fff;border-color:rgba(255,255,255,.5)">Salir</button>
@@ -45,5 +61,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <script src="app.js"></script>
+  <script>
+    // Habilita "Instalar app" (PWA autónoma, con ícono propio, sin barra del navegador)
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+    }
+  </script>
 </body>
 </html>

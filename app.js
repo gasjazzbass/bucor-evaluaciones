@@ -14,6 +14,10 @@ const state = {
   user: null,        // auth user
   profile: null,     // { id, nombre, rol, sede_id }
   sedes: [],         // [{id, nombre}]
+  trimestres: [],    // [{id, nombre, fecha_inicio, fecha_fin, ...}]
+  tsedes: [],        // [{trimestre_id, sede_id}] — sedes involucradas por trimestre
+  trimestreActivo: null,
+  trimestreSel: null,  // trimestre seleccionado en vistas de admin
   route: null,       // ruta actual
   alumnoId: null,    // ficha abierta
 };
@@ -26,6 +30,25 @@ const sedeNombre = (id) => (state.sedes.find((s) => s.id === id)?.nombre) || "�
 const iniciales = (n) => (n || "?").trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join("").toUpperCase();
 const fmtFecha = (f) => { if (!f) return "—"; const [y, m, d] = f.split("-"); return `${d}/${m}/${y}`; };
 const hoyISO = () => new Date().toISOString().slice(0, 10);
+
+// Sedes involucradas en un trimestre (si no hay ninguna definida, se asume que son todas)
+function sedesDeTrimestre(trimId) {
+  const ids = state.tsedes.filter((x) => x.trimestre_id === trimId).map((x) => x.sede_id);
+  return ids.length ? ids : state.sedes.map((s) => s.id);
+}
+// Metas del trimestre (con derivación por sede). Si no hay trimestre, usa los valores por defecto.
+function metasTrimestre(t, nSedes) {
+  if (!t) return {
+    grupoAlumnos: METAS.alumnosGrupo, grupoAprob: METAS.aprobadosGrupo,
+    sedeAlumnos: METAS.alumnosPorCoordinador, sedeAprob: METAS.aprobadosPorCoordinador,
+  };
+  const n = Math.max(1, nSedes || 1);
+  return {
+    grupoAlumnos: t.meta_alumnos, grupoAprob: t.meta_aprobados,
+    sedeAlumnos: Math.round(t.meta_alumnos / n), sedeAprob: Math.round(t.meta_aprobados / n),
+  };
+}
+const rangoTrim = (t) => t ? `${fmtFecha(t.fecha_inicio)} → ${fmtFecha(t.fecha_fin)}` : "";
 
 let toastT;
 function toast(msg, tipo = "") {
@@ -65,6 +88,22 @@ function badgeEstado(row) {
   return `<span class="badge proc">En proceso</span>`;
 }
 
+/* ---------- verificación por video ---------- */
+const MAX_VIDEO = 50 * 1024 * 1024; // 50 MB
+
+function badgeVerif(estado) {
+  if (estado === "verificado") return `<span class="badge ok">📹 Verificado</span>`;
+  if (estado === "pendiente")  return `<span class="badge proc">📹 A verificar</span>`;
+  if (estado === "rechazado")  return `<span class="badge" style="background:var(--rojo-bg);color:var(--rojo)">📹 Rechazado</span>`;
+  return `<span class="badge sin">📹 Falta video</span>`; // aprobado sin verificación cargada
+}
+
+async function urlFirmada(path) {
+  if (!path) return null;
+  const { data } = await supa.storage.from("verificaciones").createSignedUrl(path, 3600);
+  return data?.signedUrl || null;
+}
+
 /* ============================================================
    AUTENTICACIÓN
    ============================================================ */
@@ -101,13 +140,21 @@ async function arrancar(session) {
 }
 
 async function cargarContexto() {
-  const [{ data: prof, error: e1 }, { data: sedes, error: e2 }] = await Promise.all([
+  const [{ data: prof, error: e1 }, { data: sedes, error: e2 },
+         { data: trims, error: e3 }, { data: tsedes, error: e4 }] = await Promise.all([
     supa.from("profiles").select("*").eq("id", state.user.id).single(),
     supa.from("sedes").select("*").order("id"),
+    supa.from("trimestres").select("*").order("fecha_inicio", { ascending: false }),
+    supa.from("trimestre_sedes").select("*"),
   ]);
   if (e1) throw e1; if (e2) throw e2;
+  // e3/e4 pueden fallar si todavía no se corrió la migración 03 — lo toleramos
   state.profile = prof;
   state.sedes = sedes || [];
+  state.trimestres = trims || [];
+  state.tsedes = tsedes || [];
+  state.trimestreActivo = state.trimestres.find((t) => t.activo) || null;
+  state.trimestreSel = state.trimestreActivo;
 }
 
 function mostrarLogin() {
@@ -132,7 +179,7 @@ function mostrarApp() {
    ============================================================ */
 function tabsParaRol() {
   return state.profile.rol === "admin"
-    ? [["tablero", "📊 Tablero"], ["alumnos", "🏊 Alumnos"], ["config", "⚙️ Administración"]]
+    ? [["tablero", "📊 Tablero"], ["alumnos", "🏊 Alumnos"], ["verificaciones", "📹 Verif."], ["config", "⚙️ Admin."]]
     : [["alumnos", "🏊 Mis alumnos"]];
 }
 function construirTabs() {
@@ -152,17 +199,23 @@ function navegar(route, extra = {}) {
 
 async function render() {
   const v = $("#view");
+  v.style.opacity = "0";
   v.innerHTML = `<div class="card muted">Cargando…</div>`;
   try {
     if (state.route === "alumnos")      await viewAlumnos(v);
     else if (state.route === "alumno")  await viewFichaAlumno(v);
     else if (state.route === "nueva-obs") await viewNuevaObs(v);
     else if (state.route === "tablero") await viewTablero(v);
+    else if (state.route === "verificaciones") await viewVerificaciones(v);
     else if (state.route === "config")  await viewConfig(v);
   } catch (err) {
     console.error(err);
     v.innerHTML = `<div class="card"><b style="color:var(--rojo)">Ocurrió un error</b><p class="small muted">${esc(err.message || err)}</p></div>`;
   }
+  requestAnimationFrame(() => {
+    v.style.transition = "opacity .22s ease";
+    v.style.opacity = "1";
+  });
 }
 
 /* ============================================================
@@ -177,26 +230,45 @@ async function viewAlumnos(v) {
     return;
   }
 
+  // Trimestre en contexto: el admin elige; el coordinador usa el activo
+  const selTrim = esAdmin ? state.trimestreSel : state.trimestreActivo;
+  const nInvolved = selTrim ? sedesDeTrimestre(selTrim.id).length : state.sedes.length;
+  const m = metasTrimestre(selTrim, nInvolved);
+  const meta = esAdmin ? m.grupoAprob : m.sedeAprob;
+  const metaTot = esAdmin ? m.grupoAlumnos : m.sedeAlumnos;
+
   let q = supa.from("alumno_estado").select("*").eq("activo", true).order("nombre");
+  if (selTrim) q = q.eq("trimestre_id", selTrim.id);
   const { data: rows, error } = await q;
   if (error) throw error;
+
+  // estado de verificación por alumno (para el indicador de la lista)
+  const { data: verifs } = await supa.from("verificaciones").select("alumno_id,estado");
+  const vmap = {}; (verifs || []).forEach((x) => (vmap[x.alumno_id] = x.estado));
 
   const aprob = rows.filter((r) => r.aprobado).length;
   const evaluados = rows.filter((r) => r.n_obs > 0).length;
 
-  // filtro de sede para admin
+  // encabezado / filtros
   let filtro = "";
   if (esAdmin) {
-    filtro = `<label class="field" style="margin-bottom:14px"><span>Filtrar por sede</span>
-      <select id="f-sede"><option value="">Todas las sedes</option>
-      ${state.sedes.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join("")}
-      </select></label>`;
+    filtro = `<div class="row" style="margin-bottom:14px">
+      <label class="field" style="margin:0"><span>Trimestre</span>
+        <select id="f-trim"><option value="">Todos</option>
+        ${state.trimestres.map((t) => `<option value="${t.id}" ${selTrim?.id === t.id ? "selected" : ""}>${esc(t.nombre)}${t.activo ? " (activo)" : ""}</option>`).join("")}
+        </select></label>
+      <label class="field" style="margin:0"><span>Sede</span>
+        <select id="f-sede"><option value="">Todas</option>
+        ${state.sedes.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join("")}
+        </select></label>
+    </div>`;
   }
-
-  const meta = esAdmin ? METAS.aprobadosGrupo : METAS.aprobadosPorCoordinador;
-  const metaTot = esAdmin ? METAS.alumnosGrupo : METAS.alumnosPorCoordinador;
+  const headerTrim = esAdmin ? "" : (state.trimestreActivo
+    ? `<div class="chip" style="margin-bottom:10px">📅 ${esc(state.trimestreActivo.nombre)} · ${rangoTrim(state.trimestreActivo)}</div>`
+    : `<div class="card small muted" style="margin-bottom:10px">Todavía no hay un trimestre activo. Podés cargar alumnos igual; pedile al administrador que cree el trimestre para fijar las metas.</div>`);
 
   v.innerHTML = `
+    ${headerTrim}
     <div class="card">
       <div class="row" style="text-align:center">
         <div class="kpi"><div class="n">${rows.length}<span class="small muted">/${metaTot}</span></div><div class="l">Alumnos</div></div>
@@ -209,6 +281,10 @@ async function viewAlumnos(v) {
     <div id="lista-alumnos"></div>`;
 
   if (!esAdmin) $("#btn-nuevo-alumno").addEventListener("click", () => modalAlumno());
+  if (esAdmin) $("#f-trim").addEventListener("change", (e) => {
+    state.trimestreSel = state.trimestres.find((t) => String(t.id) === e.target.value) || null;
+    render();
+  });
 
   const pintar = (lista) => {
     const cont = $("#lista-alumnos");
@@ -220,7 +296,7 @@ async function viewAlumnos(v) {
         <div class="ava">${esc(iniciales(r.nombre))}</div>
         <div class="info">
           <b>${esc(r.nombre)}</b>
-          <div class="small muted">${esAdmin ? esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}</div>
+          <div class="small muted">${esAdmin ? esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}${r.aprobado ? " " + badgeVerif(vmap[r.alumno_id]) : ""}</div>
           <div class="bar ${okBar}"><i style="width:${pct ?? 0}%"></i></div>
         </div>
         <div class="pct"><div class="n">${pct === null ? "—" : pct + "%"}</div>
@@ -270,6 +346,7 @@ function modalAlumno(alumno = null) {
     } else {
       payload.sede_id = state.profile.sede_id;
       payload.coordinador_id = state.profile.id;
+      payload.trimestre_id = state.trimestreActivo?.id ?? null;
       ({ error } = await supa.from("alumnos").insert(payload));
     }
     if (error) { toast(error.message, "err"); return; }
@@ -290,6 +367,15 @@ async function viewFichaAlumno(v) {
   if (e1) throw e1; if (e2) throw e2;
   const est = estadoDeObservaciones(obs);
   const esCoord = state.profile.rol === "coordinador";
+
+  // Verificación por video (solo cuando el alumno está aprobado)
+  let verif = null, url1 = null, url2 = null;
+  if (est.aprobado) {
+    const { data } = await supa.from("verificaciones").select("*").eq("alumno_id", id).maybeSingle();
+    verif = data || null;
+    if (verif) [url1, url2] = await Promise.all([urlFirmada(verif.video1_path), urlFirmada(verif.video2_path)]);
+  }
+  const verifCard = est.aprobado ? htmlVerificacion({ verif, esCoord, url1, url2 }) : "";
 
   const filasObs = obs.map((o, i) => {
     const r = resumenMarcas(o.items);
@@ -329,12 +415,14 @@ async function viewFichaAlumno(v) {
       </div>
     </div>
 
+    ${verifCard}
+
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <h3 style="margin:0;flex:1">Observaciones (${obs.length})</h3>
         ${esCoord ? `<button class="btn agua sm no-print" id="btn-nueva-obs">＋ Nueva</button>` : ""}
       </div>
-      ${obs.length ? `<table class="tbl"><thead><tr><th>#</th><th>Fecha</th><th>NL/PL/L</th><th>%</th><th class="no-print"></th></tr></thead><tbody>${filasObs}</tbody></table>`
+      ${obs.length ? `<div class="tabla-scroll"><table class="tbl"><thead><tr><th>#</th><th>Fecha</th><th>NL/PL/L</th><th>%</th><th class="no-print"></th></tr></thead><tbody>${filasObs}</tbody></table></div>`
         : `<p class="muted">Todavía no hay observaciones. ${esCoord ? "Cargá la primera para fijar la línea de base." : ""}</p>`}
     </div>
 
@@ -377,6 +465,90 @@ async function viewFichaAlumno(v) {
           cerrarModal(); toast("Observación eliminada", "ok"); render();
         });
     }));
+
+  if (est.aprobado) wireVerificacion(id, verif, esCoord);
+}
+
+/* ---------- verificación: HTML + eventos ---------- */
+function htmlVerificacion({ verif, esCoord, url1, url2 }) {
+  const estado = verif?.estado;
+  const borde = estado === "verificado" ? "var(--verde)" : estado === "pendiente" ? "var(--amarillo)"
+    : estado === "rechazado" ? "var(--rojo)" : "var(--bucor)";
+  const videos = (url1 || url2) ? `<div class="row" style="margin-top:8px">
+    ${url1 ? `<video src="${url1}" controls preload="metadata" style="width:100%;border-radius:10px;background:#000"></video>` : `<div class="kpi muted">Falta video 1</div>`}
+    ${url2 ? `<video src="${url2}" controls preload="metadata" style="width:100%;border-radius:10px;background:#000"></video>` : `<div class="kpi muted">Falta video 2</div>`}
+  </div>` : "";
+
+  let cuerpo;
+  if (esCoord) {
+    cuerpo = estado === "verificado"
+      ? `<p class="small muted">✔ El administrador verificó los videos. ¡Trámite completo!</p>`
+      : `${estado === "rechazado" && verif?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(verif.comentario)}</b></p>` : ""}
+         <p class="small muted">El alumno alcanzó el objetivo. Subí <b>2 videos cortos</b> (máx. 50 MB c/u) donde se lo vea nadando, para que el administrador verifique.</p>
+         <label class="field"><span>Video 1</span><input type="file" id="vid1" accept="video/*"></label>
+         <label class="field"><span>Video 2</span><input type="file" id="vid2" accept="video/*"></label>
+         <button class="btn primary no-print" id="btn-subir-videos">${verif ? "Reemplazar videos" : "Subir videos"}</button>`;
+  } else { // admin
+    cuerpo = !verif
+      ? `<p class="muted">El coordinador todavía no subió los videos.</p>`
+      : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="verif-coment">${esc(verif.comentario || "")}</textarea></label>
+         <div class="row no-print">
+           <button class="btn primary" id="btn-verificar">✔ Verificar</button>
+           <button class="btn danger" id="btn-rechazar">✖ Rechazar</button>
+         </div>`;
+  }
+
+  return `<div class="card" style="border:2px solid ${borde}">
+    <div style="display:flex;align-items:center;gap:10px">
+      <h3 style="margin:0;flex:1">📹 Verificación por video</h3>
+      ${badgeVerif(estado)}
+    </div>
+    ${videos}
+    ${cuerpo}
+  </div>`;
+}
+
+function wireVerificacion(id, verif, esCoord) {
+  if (esCoord) {
+    $("#btn-subir-videos")?.addEventListener("click", async () => {
+      const f1 = $("#vid1").files[0], f2 = $("#vid2").files[0];
+      if (!f1 || !f2) { toast("Tenés que elegir los 2 videos", "err"); return; }
+      if (f1.size > MAX_VIDEO || f2.size > MAX_VIDEO) { toast("Cada video debe pesar menos de 50 MB", "err"); return; }
+      const btn = $("#btn-subir-videos"); btn.disabled = true; btn.textContent = "Subiendo…";
+      try {
+        const sube = async (file, n) => {
+          const ext = (file.name.split(".").pop() || "mp4").toLowerCase();
+          const path = `alumno_${id}/video${n}_${Date.now()}.${ext}`;
+          const { error } = await supa.storage.from("verificaciones").upload(path, file, { upsert: true, contentType: file.type || "video/mp4" });
+          if (error) throw error;
+          return path;
+        };
+        const p1 = await sube(f1, 1), p2 = await sube(f2, 2);
+        const { error } = await supa.from("verificaciones").upsert({
+          alumno_id: id, video1_path: p1, video2_path: p2, estado: "pendiente",
+          subido_por: state.profile.id, subido_en: new Date().toISOString(),
+          comentario: null, revisado_por: null, revisado_en: null,
+        });
+        if (error) throw error;
+        toast("Videos enviados para verificación", "ok"); render();
+      } catch (err) {
+        toast("Error al subir: " + (err.message || err), "err");
+        btn.disabled = false; btn.textContent = "Subir videos";
+      }
+    });
+  } else {
+    const revisar = async (estado) => {
+      const comentario = $("#verif-coment")?.value.trim() || null;
+      if (estado === "rechazado" && !comentario) { toast("Escribí un motivo para el rechazo", "err"); return; }
+      const { error } = await supa.from("verificaciones").update({
+        estado, comentario, revisado_por: state.profile.id, revisado_en: new Date().toISOString(),
+      }).eq("alumno_id", id);
+      if (error) { toast(error.message, "err"); return; }
+      toast(estado === "verificado" ? "Verificación aprobada ✔" : "Videos rechazados", "ok"); render();
+    };
+    $("#btn-verificar")?.addEventListener("click", () => revisar("verificado"));
+    $("#btn-rechazar")?.addEventListener("click", () => revisar("rechazado"));
+  }
 }
 
 function modalVerObs(o) {
@@ -483,54 +655,116 @@ async function viewNuevaObs(v) {
    VISTA: TABLERO (admin)
    ============================================================ */
 async function viewTablero(v) {
+  const selTrim = state.trimestreSel;
+  let q = supa.from("alumno_estado").select("*").eq("activo", true);
+  if (selTrim) q = q.eq("trimestre_id", selTrim.id);
   const [{ data: rows, error: e1 }, { data: profs, error: e2 }] = await Promise.all([
-    supa.from("alumno_estado").select("*").eq("activo", true),
-    supa.from("profiles").select("*").eq("rol", "coordinador"),
+    q, supa.from("profiles").select("*").eq("rol", "coordinador"),
   ]);
   if (e1) throw e1; if (e2) throw e2;
+
+  const involvedIds = selTrim ? sedesDeTrimestre(selTrim.id) : state.sedes.map((s) => s.id);
+  const sedesInv = state.sedes.filter((s) => involvedIds.includes(s.id));
+  const m = metasTrimestre(selTrim, sedesInv.length);
 
   const total = rows.length;
   const aprob = rows.filter((r) => r.aprobado).length;
   const evaluados = rows.filter((r) => r.n_obs > 0).length;
-  const pctCumpl = METAS.aprobadosGrupo ? Math.round((aprob / METAS.aprobadosGrupo) * 100) : 0;
+  const obsHechas = rows.reduce((n, r) => n + (r.n_obs || 0), 0);
+  const pctCumpl = m.grupoAprob ? Math.round((aprob / m.grupoAprob) * 100) : 0;
 
-  const porSede = state.sedes.map((s) => {
+  const porSede = sedesInv.map((s) => {
     const rs = rows.filter((r) => r.sede_id === s.id);
-    const a = rs.filter((r) => r.aprobado).length;
     const coord = profs.find((p) => p.sede_id === s.id);
-    return { sede: s, n: rs.length, evaluados: rs.filter((r) => r.n_obs > 0).length, aprob: a, coord };
+    return { sede: s, n: rs.length, evaluados: rs.filter((r) => r.n_obs > 0).length,
+             aprob: rs.filter((r) => r.aprobado).length, coord };
   });
+
+  const selector = `<label class="field" style="max-width:320px"><span>Trimestre</span>
+    <select id="t-trim"><option value="">Todos los trimestres</option>
+    ${state.trimestres.map((t) => `<option value="${t.id}" ${selTrim?.id === t.id ? "selected" : ""}>${esc(t.nombre)}${t.activo ? " (activo)" : ""}</option>`).join("")}
+    </select></label>`;
+
+  const obsKpi = selTrim?.cantidad_observaciones
+    ? `<div class="kpi"><div class="n">${obsHechas}<span class="small muted">/${selTrim.cantidad_observaciones}</span></div><div class="l">Observaciones hechas</div></div>` : "";
 
   v.innerHTML = `
     <div class="card">
-      <h3>Resumen del trimestre</h3>
+      ${selector}
+      ${selTrim ? `<div class="small muted">📅 ${rangoTrim(selTrim)} · ${sedesInv.length} sede(s) · meta ${m.grupoAprob}/${m.grupoAlumnos} aprobados</div>` : `<div class="small muted">Mostrando todos los trimestres (metas por defecto).</div>`}
+    </div>
+    <div class="card">
+      <h3>Resumen ${selTrim ? esc(selTrim.nombre) : "general"}</h3>
       <div class="row" style="text-align:center">
-        <div class="kpi"><div class="n">${total}<span class="small muted">/${METAS.alumnosGrupo}</span></div><div class="l">Alumnos en seguimiento</div></div>
+        <div class="kpi"><div class="n">${total}<span class="small muted">/${m.grupoAlumnos}</span></div><div class="l">Alumnos en seguimiento</div></div>
         <div class="kpi"><div class="n">${evaluados}</div><div class="l">Con evaluación</div></div>
-        <div class="kpi ${aprob >= METAS.aprobadosGrupo ? "good" : "warn"}"><div class="n">${aprob}<span class="small muted">/${METAS.aprobadosGrupo}</span></div><div class="l">Aprobados (meta ${METAS.aprobadosGrupo})</div></div>
-        <div class="kpi"><div class="n">${pctCumpl}%</div><div class="l">Cumplimiento de meta</div></div>
+        ${obsKpi}
+        <div class="kpi ${aprob >= m.grupoAprob ? "good" : "warn"}"><div class="n">${aprob}<span class="small muted">/${m.grupoAprob}</span></div><div class="l">Aprobados (meta ${m.grupoAprob})</div></div>
+        <div class="kpi"><div class="n">${pctCumpl}%</div><div class="l">Cumplimiento</div></div>
       </div>
-      <div class="bar ${aprob >= METAS.aprobadosGrupo ? "ok" : ""}" style="margin-top:6px"><i style="width:${Math.min(100, pctCumpl)}%"></i></div>
+      <div class="bar ${aprob >= m.grupoAprob ? "ok" : ""}" style="margin-top:6px"><i style="width:${Math.min(100, pctCumpl)}%"></i></div>
     </div>
 
     <div class="card">
       <h3>Por sede / coordinador</h3>
-      <table class="tbl">
-        <thead><tr><th>Sede</th><th>Coordinador</th><th>Alumnos</th><th>Eval.</th><th>Aprob.</th><th>Meta ${METAS.aprobadosPorCoordinador}</th></tr></thead>
+      <div class="tabla-scroll"><table class="tbl">
+        <thead><tr><th>Sede</th><th>Coordinador</th><th>Alumnos</th><th>Eval.</th><th>Aprob.</th><th>Meta ${m.sedeAprob}</th></tr></thead>
         <tbody>
         ${porSede.map((p) => `<tr>
           <td><b>${esc(p.sede.nombre)}</b></td>
           <td>${esc(p.coord?.nombre || "—")}</td>
-          <td>${p.n}/${METAS.alumnosPorCoordinador}</td>
+          <td>${p.n}/${m.sedeAlumnos}</td>
           <td>${p.evaluados}</td>
           <td><b>${p.aprob}</b></td>
-          <td>${p.aprob >= METAS.aprobadosPorCoordinador
+          <td>${p.aprob >= m.sedeAprob
               ? '<span class="badge ok">✓ cumple</span>'
-              : `<span class="badge proc">faltan ${Math.max(0, METAS.aprobadosPorCoordinador - p.aprob)}</span>`}</td>
+              : `<span class="badge proc">faltan ${Math.max(0, m.sedeAprob - p.aprob)}</span>`}</td>
         </tr>`).join("")}
         </tbody>
-      </table>
+      </table></div>
     </div>`;
+
+  $("#t-trim").addEventListener("change", (e) => {
+    state.trimestreSel = state.trimestres.find((t) => String(t.id) === e.target.value) || null;
+    render();
+  });
+}
+
+/* ============================================================
+   VISTA: VERIFICACIONES (admin)
+   ============================================================ */
+async function viewVerificaciones(v) {
+  const { data, error } = await supa.from("verificaciones")
+    .select("alumno_id, estado, subido_en, alumnos(nombre, sede_id)")
+    .order("subido_en", { ascending: true });
+  if (error) throw error;
+  const all = data || [];
+  const pend = all.filter((x) => x.estado === "pendiente");
+  const okN = all.filter((x) => x.estado === "verificado").length;
+  const rechN = all.filter((x) => x.estado === "rechazado").length;
+
+  const fila = (x) => `<div class="alumno" data-id="${x.alumno_id}">
+    <div class="ava">${esc(iniciales(x.alumnos?.nombre))}</div>
+    <div class="info"><b>${esc(x.alumnos?.nombre || "—")}</b>
+      <div class="small muted">${esc(sedeNombre(x.alumnos?.sede_id))} · enviado ${fmtFecha((x.subido_en || "").slice(0, 10))}</div></div>
+    <button class="btn agua sm">Revisar →</button>
+  </div>`;
+
+  v.innerHTML = `
+    <div class="card">
+      <div class="row" style="text-align:center">
+        <div class="kpi ${pend.length ? "warn" : ""}"><div class="n">${pend.length}</div><div class="l">A verificar</div></div>
+        <div class="kpi good"><div class="n">${okN}</div><div class="l">Verificados</div></div>
+        <div class="kpi"><div class="n">${rechN}</div><div class="l">Rechazados</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Pendientes de verificación</h3>
+      ${pend.length ? pend.map(fila).join("") : `<p class="muted">No hay videos pendientes de verificar. 🎉</p>`}
+    </div>`;
+
+  v.querySelectorAll(".alumno").forEach((el) =>
+    el.addEventListener("click", () => navegar("alumno", { alumnoId: Number(el.dataset.id) })));
 }
 
 /* ============================================================
@@ -542,6 +776,31 @@ async function viewConfig(v) {
   const coords = profs.filter((p) => p.rol === "coordinador");
 
   v.innerHTML = `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <h3 style="margin:0;flex:1">Trimestres</h3>
+        <button class="btn agua sm" id="btn-nuevo-trim">＋ Nuevo trimestre</button>
+      </div>
+      <p class="small muted">Cada trimestre define el período, las observaciones a realizar, las sedes involucradas y el objetivo (alumnos y mínimo de aprobados).</p>
+      ${state.trimestres.length ? `<div class="tabla-scroll"><table class="tbl">
+        <thead><tr><th>Nombre</th><th>Período</th><th>Sedes</th><th>Meta</th><th>Estado</th><th></th></tr></thead>
+        <tbody>
+        ${state.trimestres.map((t) => `<tr>
+          <td><b>${esc(t.nombre)}</b></td>
+          <td class="small">${rangoTrim(t)}</td>
+          <td>${sedesDeTrimestre(t.id).length}</td>
+          <td class="small">${t.meta_aprobados}/${t.meta_alumnos}</td>
+          <td>${t.activo ? '<span class="badge ok">Activo</span>' : '<span class="badge sin">—</span>'}</td>
+          <td style="white-space:nowrap">
+            ${t.activo ? "" : `<button class="btn ghost sm" data-activar-trim="${t.id}">Activar</button>`}
+            <button class="btn ghost sm" data-editar-trim="${t.id}">Editar</button>
+            <button class="btn ghost sm" data-borrar-trim="${t.id}" style="color:var(--rojo)">🗑</button>
+          </td>
+        </tr>`).join("")}
+        </tbody></table></div>`
+        : `<p class="muted">No hay trimestres creados todavía. Creá el primero para empezar a evaluar con metas.</p>`}
+    </div>
+
     <div class="card">
       <h3>Sedes</h3>
       <p class="small muted">Poné el nombre real de cada sede.</p>
@@ -589,6 +848,95 @@ async function viewConfig(v) {
     if (error) { toast(error.message, "err"); return; }
     toast("Coordinador actualizado", "ok");
   }));
+
+  // ----- Trimestres -----
+  $("#btn-nuevo-trim").addEventListener("click", () => modalTrimestre());
+  v.querySelectorAll("[data-editar-trim]").forEach((b) => b.addEventListener("click", () =>
+    modalTrimestre(state.trimestres.find((t) => String(t.id) === b.dataset.editarTrim))));
+  v.querySelectorAll("[data-activar-trim]").forEach((b) => b.addEventListener("click", async () => {
+    const id = Number(b.dataset.activarTrim);
+    await supa.from("trimestres").update({ activo: false }).neq("id", id);
+    const { error } = await supa.from("trimestres").update({ activo: true }).eq("id", id);
+    if (error) { toast(error.message, "err"); return; }
+    toast("Trimestre activado", "ok");
+    await cargarContexto(); render();
+  }));
+  v.querySelectorAll("[data-borrar-trim]").forEach((b) => b.addEventListener("click", () => {
+    const t = state.trimestres.find((x) => String(x.id) === b.dataset.borrarTrim);
+    confirmar(`¿Eliminar el trimestre "${t.nombre}"?`,
+      "Los alumnos cargados en este trimestre quedarán sin trimestre asignado (no se borran). Esta acción no se puede deshacer.",
+      async () => {
+        const { error } = await supa.from("trimestres").delete().eq("id", t.id);
+        if (error) { toast(error.message, "err"); return; }
+        cerrarModal(); toast("Trimestre eliminado", "ok");
+        await cargarContexto(); render();
+      });
+  }));
+}
+
+/* ---------- modal de alta/edición de trimestre ---------- */
+function modalTrimestre(trim = null) {
+  const editar = !!trim;
+  const checked = editar ? sedesDeTrimestre(trim.id) : state.sedes.map((s) => s.id);
+  abrirModal(`
+    <h3>${editar ? "Editar trimestre" : "Nuevo trimestre"}</h3>
+    <label class="field"><span>Nombre *</span><input id="t-nombre" placeholder="Ej: Trimestre 1 · 2026" value="${esc(trim?.nombre || "")}"></label>
+    <div class="row">
+      <label class="field"><span>Desde *</span><input type="date" id="t-ini" value="${trim?.fecha_inicio || ""}"></label>
+      <label class="field"><span>Hasta *</span><input type="date" id="t-fin" value="${trim?.fecha_fin || ""}"></label>
+    </div>
+    <label class="field"><span>Observaciones a realizar en el trimestre</span><input type="number" id="t-obs" min="0" value="${trim?.cantidad_observaciones ?? 80}"></label>
+    <div class="row">
+      <label class="field"><span>Total de alumnos a observar</span><input type="number" id="t-malum" min="0" value="${trim?.meta_alumnos ?? 80}"></label>
+      <label class="field"><span>Mínimo de aprobados (objetivo)</span><input type="number" id="t-maprob" min="0" value="${trim?.meta_aprobados ?? 72}"></label>
+    </div>
+    <div class="field"><span>Sedes / coordinadores involucrados</span>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px">
+        ${state.sedes.map((s) => `<label style="display:flex;align-items:center;gap:6px;font-weight:400">
+          <input type="checkbox" class="t-sede" value="${s.id}" ${checked.includes(s.id) ? "checked" : ""} style="width:auto"> ${esc(s.nombre)}</label>`).join("")}
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:600">
+      <input type="checkbox" id="t-activo" ${(trim?.activo || !editar) ? "checked" : ""} style="width:auto"> Marcar como trimestre activo</label>
+    <div class="modal-actions">
+      <button class="btn ghost" id="t-cancel">Cancelar</button>
+      <button class="btn primary" id="t-guardar">${editar ? "Guardar" : "Crear trimestre"}</button>
+    </div>`);
+  $("#t-cancel").addEventListener("click", cerrarModal);
+  $("#t-guardar").addEventListener("click", async () => {
+    const nombre = $("#t-nombre").value.trim();
+    const fi = $("#t-ini").value, ff = $("#t-fin").value;
+    if (!nombre) { toast("Poné un nombre al trimestre", "err"); return; }
+    if (!fi || !ff) { toast("Completá las fechas", "err"); return; }
+    if (ff < fi) { toast("La fecha 'Hasta' no puede ser anterior a 'Desde'", "err"); return; }
+    const activo = $("#t-activo").checked;
+    const payload = {
+      nombre, fecha_inicio: fi, fecha_fin: ff,
+      cantidad_observaciones: Number($("#t-obs").value || 0),
+      meta_alumnos: Number($("#t-malum").value || 0),
+      meta_aprobados: Number($("#t-maprob").value || 0),
+      activo,
+    };
+    const sedesSel = [...document.querySelectorAll(".t-sede:checked")].map((x) => Number(x.value));
+
+    let id = trim?.id, error;
+    if (editar) {
+      ({ error } = await supa.from("trimestres").update(payload).eq("id", id));
+    } else {
+      const res = await supa.from("trimestres").insert(payload).select().single();
+      error = res.error; id = res.data?.id;
+    }
+    if (error) { toast(error.message, "err"); return; }
+    // un solo trimestre activo a la vez
+    if (activo && id) await supa.from("trimestres").update({ activo: false }).neq("id", id);
+    // sincronizar sedes involucradas
+    await supa.from("trimestre_sedes").delete().eq("trimestre_id", id);
+    if (sedesSel.length) {
+      await supa.from("trimestre_sedes").insert(sedesSel.map((sid) => ({ trimestre_id: id, sede_id: sid })));
+    }
+    cerrarModal(); toast(editar ? "Trimestre actualizado" : "Trimestre creado", "ok");
+    await cargarContexto(); render();
+  });
 }
 
 /* ============================================================
