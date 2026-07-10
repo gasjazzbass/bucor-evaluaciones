@@ -121,15 +121,35 @@ $("#form-login").addEventListener("submit", async (e) => {
 });
 
 $("#btn-google").addEventListener("click", async () => {
+  // Normalizamos la URL de retorno (sin index.html) para que coincida con la lista de Supabase
+  const base = (window.location.origin + window.location.pathname).replace(/index\.html?$/i, "");
   const { error } = await supa.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: window.location.origin + window.location.pathname },
+    options: { redirectTo: base },
   });
   if (error) { $("#login-msg").textContent = "No se pudo iniciar con Google: " + error.message; }
 });
 
-$("#btn-logout").addEventListener("click", async () => { await supa.auth.signOut(); });
+$("#btn-acct").addEventListener("click", modalCuenta);
 $("#btn-notif").addEventListener("click", modalNotificaciones);
+
+function modalCuenta() {
+  const rol = state.profile.rol === "admin"
+    ? "Administrador" : "Coordinador · " + sedeNombre(state.profile.sede_id);
+  abrirModal(`
+    <div style="text-align:center">
+      <div class="ava" style="width:60px;height:60px;font-size:1.3rem;margin:0 auto 10px">${esc(iniciales(state.profile.nombre || state.user.email))}</div>
+      <h3 style="margin:0">${esc(state.profile.nombre || state.user.email)}</h3>
+      <p class="muted small" style="margin:4px 0 0">${esc(rol)}</p>
+      <p class="muted small" style="margin:2px 0 0">${esc(state.user.email)}</p>
+    </div>
+    <div class="modal-actions" style="justify-content:center;margin-top:18px">
+      <button class="btn ghost" id="acct-cerrar">Cerrar</button>
+      <button class="btn danger" id="acct-salir">Cerrar sesión</button>
+    </div>`);
+  $("#acct-cerrar").addEventListener("click", cerrarModal);
+  $("#acct-salir").addEventListener("click", async () => { cerrarModal(); await supa.auth.signOut(); });
+}
 
 supa.auth.onAuthStateChange((_evt, session) => { arrancar(session); });
 supa.auth.getSession().then(({ data }) => arrancar(data.session));
@@ -177,9 +197,7 @@ function mostrarLogin() {
 function mostrarApp() {
   $("#screen-login").classList.add("hidden");
   $("#screen-app").classList.remove("hidden");
-  $("#who-name").textContent = state.profile.nombre || state.user.email;
-  $("#who-role").textContent = state.profile.rol === "admin"
-    ? "Administrador" : "Coordinador · " + sedeNombre(state.profile.sede_id);
+  $("#acct-ini").textContent = iniciales(state.profile.nombre || state.user.email);
   construirTabs();
   const inicio = state.profile.rol === "admin" ? "tablero" : "alumnos";
   navegar(inicio);
@@ -919,7 +937,6 @@ async function viewConfig(v) {
     if (error) { toast(error.message, "err"); return; }
     state.sedes.find((s) => s.id === id).nombre = nombre;
     toast("Sede actualizada", "ok");
-    $("#who-role").textContent = "Administrador";
   }));
 
   v.querySelectorAll("[data-guardar-coord]").forEach((b) => b.addEventListener("click", async () => {

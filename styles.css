@@ -62,8 +62,14 @@ h1,h2,h3,h4,.card h2,.card h3{font-family:var(--font-head); letter-spacing:.1px}
 .appbar .spacer{flex:1}
 .appbar .who{font-size:.82rem; text-align:right; opacity:.95}
 .appbar .who b{display:block}
+.appbar{gap:10px}
+.appbar .brand{min-width:0; flex-shrink:1}
 .appbar .bell{position:relative; background:transparent; border:0; color:#fff; font-size:1.35rem;
-  cursor:pointer; padding:4px; line-height:1}
+  cursor:pointer; padding:4px; line-height:1; flex:none}
+.appbar .acct{flex:none; background:rgba(255,255,255,.2); border:0; width:36px; height:36px;
+  border-radius:50%; color:#fff; font-weight:800; font-size:.82rem; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; font-family:var(--font-ui)}
+.appbar .acct:hover{background:rgba(255,255,255,.32)}
 .appbar .bcount{position:absolute; top:-3px; right:-3px; background:var(--rojo); color:#fff;
   font-size:.62rem; font-weight:800; min-width:16px; height:16px; border-radius:999px;
   display:flex; align-items:center; justify-content:center; padding:0 3px; border:1.5px solid var(--azul-osc)}
@@ -231,15 +237,13 @@ table.tbl tr:hover td{background:var(--gris-cl)}
   .wrap{padding:12px}
   /* los KPIs y campos en fila se acomodan de a 2 (o uno) por fila */
   .row > *{flex:1 1 140px}
-  .appbar{padding:10px 12px; gap:8px}
+  .appbar{padding:calc(env(safe-area-inset-top) + 10px) 12px 10px; gap:8px}
   .appbar .brand{font-size:1.4rem}
-  .appbar .brand small{font-size:.55rem}
-  .appbar .who{font-size:.72rem}
+  .appbar .brand small{display:none}   /* el subtítulo se oculta para dar aire */
+  .appbar .brand img{height:26px}
+  .appbar .brand .logo-marca{height:22px}
   .tabs button{font-size:.82rem; padding:9px 4px}
   .kpi .n{font-size:1.5rem}
-}
-@media (max-width:380px){
-  .appbar .brand small{display:none}
 }
 
 /* ---------- Print (PDF) ---------- */
