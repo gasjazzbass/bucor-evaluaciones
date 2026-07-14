@@ -663,6 +663,7 @@ function modalVerObs(o) {
   abrirModal(`<h3>Observación · ${fmtFecha(o.fecha)}</h3>
     <p class="muted small">Resultado: <b>${o.porcentaje}%</b> (total ${o.total} / ${TOTAL_ITEMS})</p>
     ${filas}
+    ${o.notas ? `<div class="eval-grupo"><h4>Notas</h4><p style="white-space:pre-wrap;margin:0">${esc(o.notas)}</p></div>` : ""}
     <div class="modal-actions"><button class="btn primary" id="cerrar-ver">Cerrar</button></div>`);
   $("#cerrar-ver").addEventListener("click", cerrarModal);
 }
@@ -693,6 +694,8 @@ async function viewNuevaObs(v) {
         ? `<p class="small" style="background:var(--celeste);color:var(--oxford);padding:10px 12px;border-radius:10px">🧠 <b>Precargado</b> con la observación anterior. Subí solo los ítems que mejoraron (de NL→PL, PL→L). Revisá y guardá.</p>`
         : `<p class="small muted">Tocá <b>NL</b> (no logrado), <b>PL</b> (parcial) o <b>L</b> (logrado) en cada ítem. Se califican los 19.</p>`}
       <div id="rubrica"></div>
+      <label class="field" style="margin-top:14px"><span>Notas (opcional)</span>
+        <textarea id="obs-notas" placeholder="Comentarios o aclaraciones sobre esta observación…"></textarea></label>
     </div>
     <div class="eval-bar">
       <div class="res">
@@ -744,6 +747,7 @@ async function viewNuevaObs(v) {
     const { error } = await supa.from("observaciones").insert({
       alumno_id: id, fecha: $("#obs-fecha").value || hoyISO(),
       items: marks, creado_por: state.profile.id,
+      notas: $("#obs-notas").value.trim() || null,
     });
     if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = "Guardar"; return; }
     toast(`Observación guardada: ${r.pct}%`, "ok");
