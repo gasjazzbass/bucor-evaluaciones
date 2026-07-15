@@ -234,9 +234,9 @@ function mostrarBienvenida() {
   w.classList.remove("hidden");
   requestAnimationFrame(() => w.classList.add("visible"));
   setTimeout(() => {
-    w.classList.remove("visible");        // inicia el desvanecido lento (1,2s)
-    setTimeout(() => w.classList.add("hidden"), 1300);
-  }, 8000);                                // permanece 8 segundos antes de desaparecer
+    w.classList.remove("visible");        // inicia el desenfoque de salida (1,1s)
+    setTimeout(() => w.classList.add("hidden"), 1200);
+  }, 5000);                                // permanece 5 segundos antes de desaparecer
 }
 
 /* ============================================================
