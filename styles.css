@@ -122,6 +122,16 @@ input,select,textarea{
 textarea{min-height:80px; resize:vertical}
 input:focus,select:focus,textarea:focus{outline:none; background:#fff; border-color:var(--azul); box-shadow:0 0 0 4px var(--celeste)}
 
+/* ---------- Pantalla de bienvenida ---------- */
+#welcome{position:fixed; inset:0; z-index:200; display:grid; place-items:center; text-align:center;
+  padding:24px calc(24px + env(safe-area-inset-right)) 24px calc(24px + env(safe-area-inset-left));
+  background:linear-gradient(160deg,var(--agua-osc),var(--azul)); color:#fff;
+  opacity:0; transition:opacity .5s ease}
+#welcome.visible{opacity:1}
+#welcome .welcome-mascota{width:120px; margin:0 auto 10px; display:block; animation:subir .6s cubic-bezier(.25,.8,.25,1)}
+#welcome h1{font-family:var(--font-head); font-size:2rem; margin:0 0 12px; color:#fff}
+#welcome p{font-size:1.05rem; max-width:440px; line-height:1.55; opacity:.95; margin:0 auto}
+
 /* ---------- Login ---------- */
 .login-bg{min-height:100vh; display:grid; place-items:center;
   background:linear-gradient(160deg,var(--agua-osc),var(--azul)); padding:16px;

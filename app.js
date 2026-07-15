@@ -192,6 +192,7 @@ function mostrarLogin() {
   $("#screen-login").classList.remove("hidden");
   $("#form-login").reset();
   clearInterval(notifTimer);
+  bienvenidaMostrada = false; // así la próxima vez que entren se vuelve a mostrar el saludo
 }
 
 function mostrarApp() {
@@ -205,6 +206,37 @@ function mostrarApp() {
   cargarNotificaciones();
   clearInterval(notifTimer);
   notifTimer = setInterval(cargarNotificaciones, 60000);
+  // Saludo de bienvenida (solo una vez por ingreso)
+  mostrarBienvenida();
+}
+
+/* ============================================================
+   PANTALLA DE BIENVENIDA (saludo + frase motivadora al azar)
+   ============================================================ */
+const FRASES_BIENVENIDA = [
+  "Cada evaluación que hacés transforma el esfuerzo de un alumno en un logro concreto. Gracias por tu compromiso.",
+  "Los grandes resultados son la suma de pequeños esfuerzos repetidos día a día. Hoy es uno de esos días.",
+  "Detrás de cada progreso hay alguien que confió, enseñó y acompañó. Ese alguien sos vos.",
+  "Tu dedicación es lo que convierte las metas en realidades. ¡Que sea un gran día!",
+  "Enseñar a nadar también es enseñar a superarse. Gracias por hacerlo posible en cada clase.",
+];
+
+let bienvenidaMostrada = false;
+function mostrarBienvenida() {
+  if (bienvenidaMostrada) return;
+  bienvenidaMostrada = true;
+  let nombre = (state.profile.nombre || state.user.email || "").trim().split(/\s+/)[0] || "";
+  if (nombre) nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1);
+  const frase = FRASES_BIENVENIDA[Math.floor(Math.random() * FRASES_BIENVENIDA.length)];
+  $("#welcome-hola").textContent = nombre ? `¡Hola, ${nombre}!` : "¡Hola!";
+  $("#welcome-frase").textContent = frase;
+  const w = $("#welcome");
+  w.classList.remove("hidden");
+  requestAnimationFrame(() => w.classList.add("visible"));
+  setTimeout(() => {
+    w.classList.remove("visible");
+    setTimeout(() => w.classList.add("hidden"), 500);
+  }, 2600);
 }
 
 /* ============================================================

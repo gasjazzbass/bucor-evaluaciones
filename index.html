@@ -66,6 +66,15 @@
   <div id="toast"></div>
   <div id="modal-root"></div>
 
+  <!-- Pantalla de bienvenida (saludo + frase, se desvanece sola) -->
+  <div id="welcome" class="hidden">
+    <div class="welcome-inner">
+      <img src="img/mascota.png" alt="" class="welcome-mascota" onerror="this.remove()">
+      <h1 id="welcome-hola">¡Hola!</h1>
+      <p id="welcome-frase"></p>
+    </div>
+  </div>
+
   <!-- Supabase + app -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
