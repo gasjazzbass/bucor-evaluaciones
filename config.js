@@ -68,3 +68,22 @@ window.BUCOR_METAS = {
   aprobadosGrupo: 72,
   saltoObjetivo: 40, // puntos porcentuales sobre la 1ra observación
 };
+
+/* ============================================================
+   Opciones precargadas de los formularios
+   ============================================================ */
+
+// Actividades del alumno (desplegable)
+window.BUCOR_ACTIVIDADES = [
+  "Clases de natación para niños",
+  "Clases de natación para jóvenes y adultos",
+];
+
+// Asistencia por semana (veces)
+window.BUCOR_ASISTENCIA = [1, 2, 3];
+
+// Días de clase
+window.BUCOR_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
+// Horarios: franjas de una hora, de 7 a 22
+window.BUCOR_HORARIOS = Array.from({ length: 15 }, (_, i) => `${i + 7} a ${i + 8}`);

@@ -6,6 +6,10 @@ const VALORES = window.BUCOR_VALORES;
 const RUBRICA = window.BUCOR_RUBRICA;
 const TOTAL_ITEMS = window.BUCOR_TOTAL_ITEMS;
 const METAS = window.BUCOR_METAS;
+const ACTIVIDADES = window.BUCOR_ACTIVIDADES || [];
+const ASISTENCIA = window.BUCOR_ASISTENCIA || [1, 2, 3];
+const DIAS = window.BUCOR_DIAS || [];
+const HORARIOS = window.BUCOR_HORARIOS || [];
 
 const supa = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
 
@@ -31,6 +35,10 @@ const sedeNombre = (id) => (state.sedes.find((s) => s.id === id)?.nombre) || "�
 const iniciales = (n) => (n || "?").trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join("").toUpperCase();
 const fmtFecha = (f) => { if (!f) return "—"; const [y, m, d] = f.split("-"); return `${d}/${m}/${y}`; };
 const hoyISO = () => new Date().toISOString().slice(0, 10);
+const labelAsistencia = (n) => (n == 1 ? "1 vez" : `${n} veces`);
+// arma las <option> de un desplegable a partir de una lista simple
+const opciones = (lista, sel) => lista.map((x) =>
+  `<option value="${esc(x)}" ${String(x) === String(sel ?? "") ? "selected" : ""}>${esc(x)}</option>`).join("");
 
 // Sedes involucradas en un trimestre (si no hay ninguna definida, se asume que son todas)
 function sedesDeTrimestre(trimId) {
@@ -454,9 +462,17 @@ function modalAlumno(alumno = null) {
     <label class="field"><span>Nombre y apellido *</span><input id="al-nombre" value="${esc(alumno?.nombre || "")}"></label>
     <div class="row">
       <label class="field"><span>Edad</span><input id="al-edad" type="number" min="2" max="99" value="${alumno?.edad ?? ""}"></label>
-      <label class="field"><span>Día y horario</span><input id="al-horario" value="${esc(alumno?.dia_horario || "")}"></label>
+      <label class="field"><span>Actividad</span>
+        <select id="al-actividad">
+          <option value="">— Elegir —</option>
+          ${opciones(ACTIVIDADES, alumno?.actividad)}
+        </select></label>
     </div>
-    <label class="field"><span>Instructor/es</span><input id="al-instructor" value="${esc(alumno?.instructor || "")}"></label>
+    <label class="field"><span>Asistencia por semana</span>
+      <select id="al-asistencia">
+        <option value="">— Elegir —</option>
+        ${ASISTENCIA.map((n) => `<option value="${n}" ${Number(alumno?.asistencia_semanal) === n ? "selected" : ""}>${labelAsistencia(n)}</option>`).join("")}
+      </select></label>
     <div class="modal-actions">
       <button class="btn ghost" id="al-cancel">Cancelar</button>
       <button class="btn primary" id="al-guardar">${editar ? "Guardar" : "Crear alumno"}</button>
@@ -469,8 +485,8 @@ function modalAlumno(alumno = null) {
     const payload = {
       nombre,
       edad: $("#al-edad").value ? Number($("#al-edad").value) : null,
-      dia_horario: $("#al-horario").value.trim() || null,
-      instructor: $("#al-instructor").value.trim() || null,
+      actividad: $("#al-actividad").value || null,
+      asistencia_semanal: $("#al-asistencia").value ? Number($("#al-asistencia").value) : null,
     };
     let error;
     if (editar) {
@@ -536,7 +552,10 @@ async function viewFichaAlumno(v) {
         <div style="flex:1">
           <h2 style="margin:0">${esc(alumno.nombre)}</h2>
           <div class="small muted">${alumno.edad ? alumno.edad + " años · " : ""}${esc(sedeNombre(alumno.sede_id))}</div>
-          <div class="small muted">${esc(alumno.dia_horario || "")}${alumno.instructor ? " · Prof. " + esc(alumno.instructor) : ""}</div>
+          <div class="small muted">${[
+            alumno.actividad,
+            alumno.asistencia_semanal ? labelAsistencia(alumno.asistencia_semanal) + " por semana" : null,
+          ].filter(Boolean).map(esc).join(" · ")}</div>
         </div>
         <div>${badgeEstado({ n_obs: obs.length, aprobado: est.aprobado })}</div>
       </div>
@@ -692,7 +711,10 @@ function modalVerObs(o) {
       return `<div class="eval-item"><span class="nm">${esc(it.label)}</span>
         <span class="badge ${val?.clase === "v-l" ? "ok" : val?.clase === "v-pl" ? "proc" : "sin"}">${val?.sigla || "—"}</span></div>`;
     }).join("")}</div>`).join("");
+  const clase = [o.dia, o.horario ? o.horario + " hs" : null, o.instructor ? "Prof. " + o.instructor : null]
+    .filter(Boolean).map(esc).join(" · ");
   abrirModal(`<h3>Observación · ${fmtFecha(o.fecha)}</h3>
+    ${clase ? `<p class="muted small" style="margin:0 0 4px">${clase}</p>` : ""}
     <p class="muted small">Resultado: <b>${o.porcentaje}%</b> (total ${o.total} / ${TOTAL_ITEMS})</p>
     ${filas}
     ${o.notas ? `<div class="eval-grupo"><h4>Notas</h4><p style="white-space:pre-wrap;margin:0">${esc(o.notas)}</p></div>` : ""}
@@ -707,7 +729,7 @@ async function viewNuevaObs(v) {
   const id = state.alumnoId;
   const [{ data: alumno, error }, { data: prev }] = await Promise.all([
     supa.from("alumnos").select("*").eq("id", id).single(),
-    supa.from("observaciones").select("items,fecha").eq("alumno_id", id)
+    supa.from("observaciones").select("items,fecha,instructor,dia,horario").eq("alumno_id", id)
       .order("fecha", { ascending: false }).order("creado", { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (error) throw error;
@@ -720,8 +742,16 @@ async function viewNuevaObs(v) {
     <div class="card">
       <h3 style="margin:0">Nueva observación</h3>
       <div class="small muted">${esc(alumno.nombre)} · ${esc(sedeNombre(alumno.sede_id))}</div>
-      <label class="field" style="margin-top:12px;max-width:220px"><span>Fecha de la observación</span>
-        <input type="date" id="obs-fecha" value="${hoyISO()}" max="${hoyISO()}"></label>
+      <div class="row" style="margin-top:12px">
+        <label class="field"><span>Fecha de la observación</span>
+          <input type="date" id="obs-fecha" value="${hoyISO()}" max="${hoyISO()}"></label>
+        <label class="field"><span>Día</span>
+          <select id="obs-dia"><option value="">— Elegir —</option>${opciones(DIAS, prev?.dia)}</select></label>
+        <label class="field"><span>Horario</span>
+          <select id="obs-horario"><option value="">— Elegir —</option>${opciones(HORARIOS, prev?.horario)}</select></label>
+      </div>
+      <label class="field"><span>Instructor/es</span>
+        <input id="obs-instructor" value="${esc(prev?.instructor || "")}" placeholder="Nombre del instructor a cargo"></label>
       ${precargado
         ? `<p class="small" style="background:var(--celeste);color:var(--oxford);padding:10px 12px;border-radius:10px">🧠 <b>Precargado</b> con la observación anterior. Subí solo los ítems que mejoraron (de NL→PL, PL→L). Revisá y guardá.</p>`
         : `<p class="small muted">Tocá <b>NL</b> (no logrado), <b>PL</b> (parcial) o <b>L</b> (logrado) en cada ítem. Se califican los 19.</p>`}
@@ -780,6 +810,9 @@ async function viewNuevaObs(v) {
       alumno_id: id, fecha: $("#obs-fecha").value || hoyISO(),
       items: marks, creado_por: state.profile.id,
       notas: $("#obs-notas").value.trim() || null,
+      dia: $("#obs-dia").value || null,
+      horario: $("#obs-horario").value || null,
+      instructor: $("#obs-instructor").value.trim() || null,
     });
     if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = "Guardar"; return; }
     toast(`Observación guardada: ${r.pct}%`, "ok");
@@ -1079,7 +1112,13 @@ function modalTrimestre(trim = null) {
    ============================================================ */
 function abrirModal(html) {
   $("#modal-root").innerHTML = `<div class="modal-bg"><div class="modal">${html}</div></div>`;
-  $("#modal-root .modal-bg").addEventListener("click", (e) => { if (e.target.classList.contains("modal-bg")) cerrarModal(); });
+  const bg = $("#modal-root .modal-bg");
+  // En el celular, el mismo toque que abre el modal puede volver a dispararse sobre el
+  // fondo recién creado ("ghost click") y cerrarlo al instante. Por eso habilitamos el
+  // cierre-al-tocar-afuera recién después de un breve margen.
+  setTimeout(() => {
+    bg.addEventListener("click", (e) => { if (e.target === bg) cerrarModal(); });
+  }, 350);
 }
 function cerrarModal() { $("#modal-root").innerHTML = ""; }
 
