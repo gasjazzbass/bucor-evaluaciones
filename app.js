@@ -420,7 +420,13 @@ async function viewAlumnos(v) {
     ${filtro}
     <div id="lista-alumnos"></div>`;
 
-  if (!esAdmin) $("#btn-nuevo-alumno").addEventListener("click", () => modalAlumno());
+  if (!esAdmin) $("#btn-nuevo-alumno").addEventListener("click", () => {
+    if (!state.trimestreActivo) {
+      toast("No hay un trimestre activo. Pedile al administrador que active uno para poder cargar alumnos.", "err");
+      return;
+    }
+    modalAlumno();
+  });
   if (esAdmin) $("#f-trim").addEventListener("change", (e) => {
     state.trimestreSel = state.trimestres.find((t) => String(t.id) === e.target.value) || null;
     render();
@@ -457,6 +463,7 @@ async function viewAlumnos(v) {
 /* ---------- modal alta/edición de alumno ---------- */
 function modalAlumno(alumno = null) {
   const editar = !!alumno;
+  const admin = state.profile.rol === "admin";
   abrirModal(`
     <h3>${editar ? "Editar alumno" : "Nuevo alumno"}</h3>
     <label class="field"><span>Nombre y apellido *</span><input id="al-nombre" value="${esc(alumno?.nombre || "")}"></label>
@@ -473,6 +480,10 @@ function modalAlumno(alumno = null) {
         <option value="">— Elegir —</option>
         ${ASISTENCIA.map((n) => `<option value="${n}" ${Number(alumno?.asistencia_semanal) === n ? "selected" : ""}>${labelAsistencia(n)}</option>`).join("")}
       </select></label>
+    ${(editar && admin) ? `<label class="field"><span>Trimestre (solo admin)</span>
+      <select id="al-trimestre"><option value="">— Sin asignar —</option>
+        ${state.trimestres.map((t) => `<option value="${t.id}" ${Number(alumno?.trimestre_id) === t.id ? "selected" : ""}>${esc(t.nombre)}${t.activo ? " (activo)" : ""}</option>`).join("")}
+      </select></label>` : ""}
     <div class="modal-actions">
       <button class="btn ghost" id="al-cancel">Cancelar</button>
       <button class="btn primary" id="al-guardar">${editar ? "Guardar" : "Crear alumno"}</button>
@@ -490,6 +501,7 @@ function modalAlumno(alumno = null) {
     };
     let error;
     if (editar) {
+      if (admin && $("#al-trimestre")) payload.trimestre_id = $("#al-trimestre").value ? Number($("#al-trimestre").value) : null;
       ({ error } = await supa.from("alumnos").update(payload).eq("id", alumno.id));
     } else {
       payload.sede_id = state.profile.sede_id;
@@ -515,6 +527,8 @@ async function viewFichaAlumno(v) {
   if (e1) throw e1; if (e2) throw e2;
   const est = estadoDeObservaciones(obs);
   const esCoord = state.profile.rol === "coordinador";
+  const esAdmin = state.profile.rol === "admin";
+  const gestor = esCoord || esAdmin;   // quién puede crear/editar/borrar (el admin puede corregir todo)
 
   // Verificación por video (solo cuando el alumno está aprobado)
   let verif = null, url1 = null, url2 = null;
@@ -535,7 +549,7 @@ async function viewFichaAlumno(v) {
       <td><b>${o.porcentaje}%</b> ${objOk ? "✓" : ""}</td>
       <td class="no-print" style="white-space:nowrap">
         <button class="btn ghost sm" data-ver="${o.id}">Ver</button>
-        ${esCoord ? `<button class="btn ghost sm" data-del-obs="${o.id}" title="Eliminar observación" style="color:var(--rojo)">🗑</button>` : ""}
+        ${gestor ? `<button class="btn ghost sm" data-del-obs="${o.id}" title="Eliminar observación" style="color:var(--rojo)">🗑</button>` : ""}
       </td>
     </tr>`;
   }).join("");
@@ -571,7 +585,7 @@ async function viewFichaAlumno(v) {
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <h3 style="margin:0;flex:1">Observaciones (${obs.length})</h3>
-        ${esCoord ? `<button class="btn agua sm no-print" id="btn-nueva-obs">＋ Nueva</button>` : ""}
+        ${gestor ? `<button class="btn agua sm no-print" id="btn-nueva-obs">＋ Nueva</button>` : ""}
       </div>
       ${obs.length ? `<div class="tabla-scroll"><table class="tbl"><thead><tr><th>#</th><th>Fecha</th><th>NL/PL/L</th><th>%</th><th class="no-print"></th></tr></thead><tbody>${filasObs}</tbody></table></div>`
         : `<p class="muted">Todavía no hay observaciones. ${esCoord ? "Cargá la primera para fijar la línea de base." : ""}</p>`}
@@ -579,15 +593,15 @@ async function viewFichaAlumno(v) {
 
     <div class="row no-print">
       <button class="btn ghost" id="btn-pdf">🖨️ Exportar PDF</button>
-      ${esCoord ? `<button class="btn ghost" id="btn-editar-al">✏️ Editar datos</button>` : ""}
+      ${gestor ? `<button class="btn ghost" id="btn-editar-al">✏️ Editar datos</button>` : ""}
     </div>
-    ${esCoord ? `<div class="no-print" style="margin-top:18px;text-align:center">
+    ${gestor ? `<div class="no-print" style="margin-top:18px;text-align:center">
       <button class="btn danger sm" id="btn-del-al">🗑 Eliminar alumno</button>
     </div>` : ""}`;
 
   $("#btn-volver").addEventListener("click", () => navegar("alumnos"));
   $("#btn-pdf").addEventListener("click", () => window.print());
-  if (esCoord) {
+  if (gestor) {
     $("#btn-nueva-obs")?.addEventListener("click", () => navegar("nueva-obs", { alumnoId: id }));
     $("#btn-editar-al").addEventListener("click", () => modalAlumno(alumno));
     $("#btn-del-al").addEventListener("click", () => confirmar(
