@@ -210,8 +210,8 @@ function mostrarApp() {
   construirTabs();
   const inicio = state.profile.rol === "admin" ? "tablero" : "alumnos";
   navegar(inicio);
-  // Notificaciones: carga inicial + refresco cada 60s
-  cargarNotificaciones();
+  // Notificaciones: genera recordatorios pendientes, carga inicial + refresco cada 60s
+  revisarRecordatorios();
   clearInterval(notifTimer);
   notifTimer = setInterval(cargarNotificaciones, 60000);
   // Saludo de bienvenida (solo una vez por ingreso)
@@ -251,6 +251,13 @@ function mostrarBienvenida() {
    NOTIFICACIONES (campanita)
    ============================================================ */
 let notifTimer = null;
+
+// Pide a la base que genere los recordatorios de "15 días sin observar" y luego refresca la campanita.
+// Es idempotente: si el aviso de ese alumno ya existe, no lo repite.
+async function revisarRecordatorios() {
+  try { await supa.rpc("generar_recordatorios_observacion"); } catch (e) { /* si aún no se corrió la migración 09, seguimos igual */ }
+  await cargarNotificaciones();
+}
 
 async function cargarNotificaciones() {
   if (!state.profile) return;
