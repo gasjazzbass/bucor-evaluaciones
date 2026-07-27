@@ -546,6 +546,15 @@ async function viewFichaAlumno(v) {
   }
   const verifCard = est.aprobado ? htmlVerificacion({ verif, esCoord, url1, url2 }) : "";
 
+  // Video inicial: disponible una vez que hay una primera observación
+  let vi = null, urlVi = null;
+  if (obs.length >= 1) {
+    const { data } = await supa.from("video_inicial").select("*").eq("alumno_id", id).maybeSingle();
+    vi = data || null;
+    if (vi) urlVi = await urlFirmada(vi.video_path);
+  }
+  const inicialCard = obs.length >= 1 ? htmlVideoInicial({ vi, esCoord, url: urlVi }) : "";
+
   const filasObs = obs.map((o, i) => {
     const r = resumenMarcas(o.items);
     const objOk = est.objetivo != null && i > 0 && Number(o.porcentaje) >= est.objetivo;
@@ -586,6 +595,8 @@ async function viewFichaAlumno(v) {
         <div class="kpi ${est.aprobado ? "good" : ""}"><div class="n">${est.mejorPost ?? "—"}${est.mejorPost != null ? "%" : ""}</div><div class="l">Mejor posterior</div></div>
       </div>
     </div>
+
+    ${inicialCard}
 
     ${verifCard}
 
@@ -639,6 +650,7 @@ async function viewFichaAlumno(v) {
     }));
 
   if (est.aprobado) wireVerificacion(id, verif, esCoord);
+  if (obs.length >= 1) wireVideoInicial(id, vi, esCoord);
 }
 
 /* ---------- verificación: HTML + eventos ---------- */
@@ -720,6 +732,80 @@ function wireVerificacion(id, verif, esCoord) {
     };
     $("#btn-verificar")?.addEventListener("click", () => revisar("verificado"));
     $("#btn-rechazar")?.addEventListener("click", () => revisar("rechazado"));
+  }
+}
+
+/* ---------- video inicial: HTML + eventos (espeja la verificación, 1 solo video) ---------- */
+function htmlVideoInicial({ vi, esCoord, url }) {
+  const estado = vi?.estado;
+  const borde = estado === "verificado" ? "var(--verde)" : estado === "pendiente" ? "var(--amarillo)"
+    : estado === "rechazado" ? "var(--rojo)" : "var(--bucor)";
+  const video = url ? `<div style="margin-top:8px"><video src="${url}" controls preload="metadata" style="width:100%;border-radius:10px;background:#000"></video></div>` : "";
+
+  let cuerpo;
+  if (esCoord) {
+    cuerpo = estado === "verificado"
+      ? `<p class="small muted">✔ El administrador verificó el video inicial. ¡Registro listo!</p>`
+      : `${estado === "rechazado" && vi?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(vi.comentario)}</b></p>` : ""}
+         <p class="small muted">Registrá el <b>punto de partida</b> del alumno: subí <b>1 video corto</b> (máx. 50 MB) donde se vea su nivel inicial, para contrastarlo al lograr el objetivo.</p>
+         <label class="field"><span>Video inicial</span><input type="file" id="vi-file" accept="video/*"></label>
+         <button class="btn primary no-print" id="btn-subir-inicial">${vi ? "Reemplazar video" : "Subir video"}</button>`;
+  } else { // admin
+    cuerpo = !vi
+      ? `<p class="muted">El coordinador todavía no subió el video inicial.</p>`
+      : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="vi-coment">${esc(vi.comentario || "")}</textarea></label>
+         <div class="row no-print">
+           <button class="btn primary" id="btn-vi-verificar">✔ Verificar</button>
+           <button class="btn danger" id="btn-vi-rechazar">✖ Rechazar</button>
+         </div>`;
+  }
+
+  return `<div class="card" style="border:2px solid ${borde}">
+    <div style="display:flex;align-items:center;gap:10px">
+      <h3 style="margin:0;flex:1">🎬 Video inicial</h3>
+      ${badgeVerif(estado)}
+    </div>
+    ${video}
+    ${cuerpo}
+  </div>`;
+}
+
+function wireVideoInicial(id, vi, esCoord) {
+  if (esCoord) {
+    $("#btn-subir-inicial")?.addEventListener("click", async () => {
+      const f = $("#vi-file").files[0];
+      if (!f) { toast("Elegí el video inicial", "err"); return; }
+      if (f.size > MAX_VIDEO) { toast("El video debe pesar menos de 50 MB", "err"); return; }
+      const btn = $("#btn-subir-inicial"); btn.disabled = true; btn.textContent = "Subiendo…";
+      try {
+        const ext = (f.name.split(".").pop() || "mp4").toLowerCase();
+        const path = `alumno_${id}/inicial_${Date.now()}.${ext}`;
+        const { error: e1 } = await supa.storage.from("verificaciones").upload(path, f, { upsert: true, contentType: f.type || "video/mp4" });
+        if (e1) throw e1;
+        const { error } = await supa.from("video_inicial").upsert({
+          alumno_id: id, video_path: path, estado: "pendiente",
+          subido_por: state.profile.id, subido_en: new Date().toISOString(),
+          comentario: null, revisado_por: null, revisado_en: null,
+        });
+        if (error) throw error;
+        toast("Video inicial enviado para verificación", "ok"); render();
+      } catch (err) {
+        toast("Error al subir: " + (err.message || err), "err");
+        btn.disabled = false; btn.textContent = "Subir video";
+      }
+    });
+  } else {
+    const revisar = async (estado) => {
+      const comentario = $("#vi-coment")?.value.trim() || null;
+      if (estado === "rechazado" && !comentario) { toast("Escribí un motivo para el rechazo", "err"); return; }
+      const { error } = await supa.from("video_inicial").update({
+        estado, comentario, revisado_por: state.profile.id, revisado_en: new Date().toISOString(),
+      }).eq("alumno_id", id);
+      if (error) { toast(error.message, "err"); return; }
+      toast(estado === "verificado" ? "Video inicial verificado ✔" : "Video inicial rechazado", "ok"); render();
+    };
+    $("#btn-vi-verificar")?.addEventListener("click", () => revisar("verificado"));
+    $("#btn-vi-rechazar")?.addEventListener("click", () => revisar("rechazado"));
   }
 }
 
@@ -924,19 +1010,24 @@ async function viewTablero(v) {
    VISTA: VERIFICACIONES (admin)
    ============================================================ */
 async function viewVerificaciones(v) {
-  const { data, error } = await supa.from("verificaciones")
-    .select("alumno_id, estado, subido_en, alumnos(nombre, sede_id)")
-    .order("subido_en", { ascending: true });
-  if (error) throw error;
-  const all = data || [];
-  const pend = all.filter((x) => x.estado === "pendiente");
+  const [{ data: vc, error: e1 }, { data: vin }] = await Promise.all([
+    supa.from("verificaciones").select("alumno_id, estado, subido_en, alumnos(nombre, sede_id)").order("subido_en", { ascending: true }),
+    supa.from("video_inicial").select("alumno_id, estado, subido_en, alumnos(nombre, sede_id)").order("subido_en", { ascending: true }),
+  ]);
+  if (e1) throw e1;  // (vin puede venir vacío si aún no se corrió la migración 10)
+  const all = [
+    ...(vc || []).map((x) => ({ ...x, kind: "cierre" })),
+    ...(vin || []).map((x) => ({ ...x, kind: "inicial" })),
+  ];
+  const pend = all.filter((x) => x.estado === "pendiente")
+    .sort((a, b) => String(a.subido_en).localeCompare(String(b.subido_en)));
   const okN = all.filter((x) => x.estado === "verificado").length;
   const rechN = all.filter((x) => x.estado === "rechazado").length;
 
   const fila = (x) => `<div class="alumno" data-id="${x.alumno_id}">
     <div class="ava">${esc(iniciales(x.alumnos?.nombre))}</div>
     <div class="info"><b>${esc(x.alumnos?.nombre || "—")}</b>
-      <div class="small muted">${esc(sedeNombre(x.alumnos?.sede_id))} · enviado ${fmtFecha((x.subido_en || "").slice(0, 10))}</div></div>
+      <div class="small muted">${x.kind === "inicial" ? "🎬 Video inicial" : "📹 Verificación de cierre"} · ${esc(sedeNombre(x.alumnos?.sede_id))} · enviado ${fmtFecha((x.subido_en || "").slice(0, 10))}</div></div>
     <button class="btn agua sm">Revisar →</button>
   </div>`;
 
