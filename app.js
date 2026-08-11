@@ -32,6 +32,8 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const sedeNombre = (id) => (state.sedes.find((s) => s.id === id)?.nombre) || "—";
+const esSedePrueba = (id) => !!(state.sedePrueba && id === state.sedePrueba.id);
+const sedesOficiales = () => state.sedes.filter((s) => !s.es_prueba);
 const iniciales = (n) => (n || "?").trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join("").toUpperCase();
 const fmtFecha = (f) => { if (!f) return "—"; const [y, m, d] = f.split("-"); return `${d}/${m}/${y}`; };
 const hoyISO = () => new Date().toISOString().slice(0, 10);
@@ -189,6 +191,7 @@ async function cargarContexto() {
   // e3/e4 pueden fallar si todavía no se corrió la migración 03 — lo toleramos
   state.profile = prof;
   state.sedes = sedes || [];
+  state.sedePrueba = state.sedes.find((s) => s.es_prueba) || null;   // sede de testeo (fuera de estadísticas)
   state.trimestres = trims || [];
   state.tsedes = tsedes || [];
   state.trimestreActivo = state.trimestres.find((t) => t.activo) || null;
@@ -393,8 +396,10 @@ async function viewAlumnos(v) {
   const { data: verifs } = await supa.from("verificaciones").select("alumno_id,estado");
   const vmap = {}; (verifs || []).forEach((x) => (vmap[x.alumno_id] = x.estado));
 
-  const aprob = rows.filter((r) => r.aprobado).length;
-  const evaluados = rows.filter((r) => r.n_obs > 0).length;
+  // La sede de pruebas no cuenta en los KPIs oficiales
+  const filasOf = rows.filter((r) => !esSedePrueba(r.sede_id));
+  const aprob = filasOf.filter((r) => r.aprobado).length;
+  const evaluados = filasOf.filter((r) => r.n_obs > 0).length;
 
   // encabezado / filtros
   let filtro = "";
@@ -418,12 +423,14 @@ async function viewAlumnos(v) {
     ${headerTrim}
     <div class="card">
       <div class="row" style="text-align:center">
-        <div class="kpi"><div class="n">${rows.length}<span class="small muted">/${metaTot}</span></div><div class="l">Alumnos</div></div>
+        <div class="kpi"><div class="n">${filasOf.length}<span class="small muted">/${metaTot}</span></div><div class="l">Alumnos</div></div>
         <div class="kpi"><div class="n">${evaluados}</div><div class="l">Con evaluación</div></div>
         <div class="kpi ${aprob >= meta ? "good" : "warn"}"><div class="n">${aprob}<span class="small muted">/${meta}</span></div><div class="l">Aprobados (meta ${meta})</div></div>
       </div>
     </div>
-    ${esAdmin ? "" : `<button class="btn primary block no-print" id="btn-nuevo-alumno" style="margin-bottom:14px">＋ Nuevo alumno</button>`}
+    ${esAdmin
+      ? (state.sedePrueba ? `<button class="btn ghost block no-print" id="btn-nuevo-prueba" style="margin-bottom:14px">🧪 Nuevo alumno de prueba</button>` : "")
+      : `<button class="btn primary block no-print" id="btn-nuevo-alumno" style="margin-bottom:14px">＋ Nuevo alumno</button>`}
     ${filtro}
     <div id="lista-alumnos"></div>`;
 
@@ -434,6 +441,7 @@ async function viewAlumnos(v) {
     }
     modalAlumno();
   });
+  if (esAdmin && state.sedePrueba) $("#btn-nuevo-prueba").addEventListener("click", () => modalAlumno(null, { prueba: true }));
   if (esAdmin) $("#f-trim").addEventListener("change", (e) => {
     state.trimestreSel = state.trimestres.find((t) => String(t.id) === e.target.value) || null;
     render();
@@ -449,7 +457,7 @@ async function viewAlumnos(v) {
         <div class="ava">${esc(iniciales(r.nombre))}</div>
         <div class="info">
           <b>${esc(r.nombre)}</b>
-          <div class="small muted">${esAdmin ? esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}${r.aprobado ? " " + badgeVerif(vmap[r.alumno_id]) : ""}</div>
+          <div class="small muted">${esAdmin ? (esSedePrueba(r.sede_id) ? "🧪 " : "") + esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}${r.aprobado ? " " + badgeVerif(vmap[r.alumno_id]) : ""}</div>
           <div class="bar ${okBar}"><i style="width:${pct ?? 0}%"></i></div>
         </div>
         <div class="pct"><div class="n">${pct === null ? "—" : pct + "%"}</div>
@@ -459,20 +467,22 @@ async function viewAlumnos(v) {
     cont.querySelectorAll(".alumno").forEach((el) =>
       el.addEventListener("click", () => navegar("alumno", { alumnoId: Number(el.dataset.id) })));
   };
-  pintar(rows);
+  pintar(esAdmin ? filasOf : rows);   // por defecto el admin ve solo lo oficial; filtra a "Sede de pruebas" para ver los de testeo
 
   if (esAdmin) $("#f-sede").addEventListener("change", (e) => {
     const id = e.target.value;
-    pintar(id ? rows.filter((r) => String(r.sede_id) === id) : rows);
+    pintar(id ? rows.filter((r) => String(r.sede_id) === id) : filasOf);
   });
 }
 
 /* ---------- modal alta/edición de alumno ---------- */
-function modalAlumno(alumno = null) {
+function modalAlumno(alumno = null, opts = {}) {
   const editar = !!alumno;
   const admin = state.profile.rol === "admin";
+  const prueba = !editar && admin && !!opts.prueba;   // admin creando alumno de testeo
   abrirModal(`
-    <h3>${editar ? "Editar alumno" : "Nuevo alumno"}</h3>
+    <h3>${editar ? "Editar alumno" : (prueba ? "🧪 Nuevo alumno de prueba" : "Nuevo alumno")}</h3>
+    ${prueba ? `<p class="small muted" style="margin-top:-6px">Se crea en la <b>Sede de pruebas</b>. No afecta las estadísticas oficiales.</p>` : ""}
     <label class="field"><span>Nombre y apellido *</span><input id="al-nombre" value="${esc(alumno?.nombre || "")}"></label>
     <div class="row">
       <label class="field"><span>Edad</span><input id="al-edad" type="number" min="2" max="99" value="${alumno?.edad ?? ""}"></label>
@@ -510,6 +520,13 @@ function modalAlumno(alumno = null) {
     if (editar) {
       if (admin && $("#al-trimestre")) payload.trimestre_id = $("#al-trimestre").value ? Number($("#al-trimestre").value) : null;
       ({ error } = await supa.from("alumnos").update(payload).eq("id", alumno.id));
+    } else if (prueba) {
+      // Alumno de testeo: va a la sede de pruebas, con el admin como responsable
+      if (!state.sedePrueba) { toast("No existe la Sede de pruebas. Corré la migración 11.", "err"); return; }
+      payload.sede_id = state.sedePrueba.id;
+      payload.coordinador_id = state.profile.id;
+      payload.trimestre_id = state.trimestreActivo?.id ?? null;
+      ({ error } = await supa.from("alumnos").insert(payload));
     } else {
       payload.sede_id = state.profile.sede_id;
       payload.coordinador_id = state.profile.id;
@@ -939,14 +956,17 @@ async function viewTablero(v) {
   ]);
   if (e1) throw e1; if (e2) throw e2;
 
+  // Excluimos la sede de pruebas de TODAS las estadísticas oficiales
+  const filas = (rows || []).filter((r) => !esSedePrueba(r.sede_id));
+
   const involvedIds = selTrim ? sedesDeTrimestre(selTrim.id) : state.sedes.map((s) => s.id);
-  const sedesInv = state.sedes.filter((s) => involvedIds.includes(s.id));
+  const sedesInv = state.sedes.filter((s) => involvedIds.includes(s.id) && !s.es_prueba);
   const m = metasTrimestre(selTrim, sedesInv.length);
 
-  const total = rows.length;
-  const aprob = rows.filter((r) => r.aprobado).length;
-  const evaluados = rows.filter((r) => r.n_obs > 0).length;
-  const obsHechas = rows.reduce((n, r) => n + (r.n_obs || 0), 0);
+  const total = filas.length;
+  const aprob = filas.filter((r) => r.aprobado).length;
+  const evaluados = filas.filter((r) => r.n_obs > 0).length;
+  const obsHechas = filas.reduce((n, r) => n + (r.n_obs || 0), 0);
   const pctCumpl = m.grupoAprob ? Math.round((aprob / m.grupoAprob) * 100) : 0;
 
   const porSede = sedesInv.map((s) => {
@@ -1103,7 +1123,7 @@ async function viewConfig(v) {
           <label class="field" style="margin:0"><span>Sede</span>
             <select data-csede="${c.id}">
               <option value="">— Sin asignar —</option>
-              ${state.sedes.map((s) => `<option value="${s.id}" ${s.id === c.sede_id ? "selected" : ""}>${esc(s.nombre)}</option>`).join("")}
+              ${sedesOficiales().map((s) => `<option value="${s.id}" ${s.id === c.sede_id ? "selected" : ""}>${esc(s.nombre)}</option>`).join("")}
             </select></label>
           <button class="btn ghost sm" data-guardar-coord="${c.id}" style="flex:none">Guardar</button>
         </div>`).join("")
@@ -1157,7 +1177,7 @@ async function viewConfig(v) {
 /* ---------- modal de alta/edición de trimestre ---------- */
 function modalTrimestre(trim = null) {
   const editar = !!trim;
-  const checked = editar ? sedesDeTrimestre(trim.id) : state.sedes.map((s) => s.id);
+  const checked = editar ? sedesDeTrimestre(trim.id) : sedesOficiales().map((s) => s.id);
   abrirModal(`
     <h3>${editar ? "Editar trimestre" : "Nuevo trimestre"}</h3>
     <label class="field"><span>Nombre *</span><input id="t-nombre" placeholder="Ej: Trimestre 1 · 2026" value="${esc(trim?.nombre || "")}"></label>
@@ -1172,7 +1192,7 @@ function modalTrimestre(trim = null) {
     </div>
     <div class="field"><span>Sedes / coordinadores involucrados</span>
       <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px">
-        ${state.sedes.map((s) => `<label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        ${sedesOficiales().map((s) => `<label style="display:flex;align-items:center;gap:6px;font-weight:400">
           <input type="checkbox" class="t-sede" value="${s.id}" ${checked.includes(s.id) ? "checked" : ""} style="width:auto"> ${esc(s.nombre)}</label>`).join("")}
       </div>
     </div>
