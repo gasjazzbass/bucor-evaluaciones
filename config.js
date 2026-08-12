@@ -87,3 +87,36 @@ window.BUCOR_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sáb
 
 // Horarios: franjas de una hora, de 7 a 22
 window.BUCOR_HORARIOS = Array.from({ length: 15 }, (_, i) => `${i + 7} a ${i + 8}`);
+
+/* ============================================================
+   PRE-EQUIPO · dos rúbricas (una por etapa) con umbral de éxito fijo
+   ⚠️ PENDIENTE: reemplazar ítems y umbrales por los definitivos.
+   ============================================================ */
+window.BUCOR_PREEQUIPO = {
+  // Etapa 1: evaluación de candidatos a ser invitados al pre-equipo
+  candidato: {
+    titulo: "Evaluación de candidato",
+    umbral: 70,   // % de éxito (a definir)
+    rubrica: [
+      { cat: "Ítems a definir", items: [
+        { key: "cand_1", label: "Ítem 1 (a definir)" },
+        { key: "cand_2", label: "Ítem 2 (a definir)" },
+        { key: "cand_3", label: "Ítem 3 (a definir)" },
+        { key: "cand_4", label: "Ítem 4 (a definir)" },
+      ]},
+    ],
+  },
+  // Etapa 2: seguimiento dentro del pre-equipo hasta pasar al equipo oficial
+  preequipo: {
+    titulo: "Seguimiento en el pre-equipo",
+    umbral: 70,   // % de éxito (a definir)
+    rubrica: [
+      { cat: "Ítems a definir", items: [
+        { key: "seg_1", label: "Ítem 1 (a definir)" },
+        { key: "seg_2", label: "Ítem 2 (a definir)" },
+        { key: "seg_3", label: "Ítem 3 (a definir)" },
+        { key: "seg_4", label: "Ítem 4 (a definir)" },
+      ]},
+    ],
+  },
+};

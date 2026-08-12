@@ -10,6 +10,7 @@ const ACTIVIDADES = window.BUCOR_ACTIVIDADES || [];
 const ASISTENCIA = window.BUCOR_ASISTENCIA || [1, 2, 3];
 const DIAS = window.BUCOR_DIAS || [];
 const HORARIOS = window.BUCOR_HORARIOS || [];
+const PREEQUIPO = window.BUCOR_PREEQUIPO || { candidato: { umbral: 100, rubrica: [] }, preequipo: { umbral: 100, rubrica: [] } };
 
 const supa = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
 
@@ -25,6 +26,8 @@ const state = {
   notifs: [],        // notificaciones del usuario
   route: null,       // ruta actual
   alumnoId: null,    // ficha abierta
+  preId: null,       // ficha de pre-equipo abierta
+  preFiltro: null,   // estado seleccionado en la sección pre-equipo
 };
 
 /* ---------- helpers ---------- */
@@ -144,8 +147,9 @@ $("#btn-acct").addEventListener("click", modalCuenta);
 $("#btn-notif").addEventListener("click", modalNotificaciones);
 
 function modalCuenta() {
-  const rol = state.profile.rol === "admin"
-    ? "Administrador" : "Coordinador · " + sedeNombre(state.profile.sede_id);
+  const rol = state.profile.rol === "admin" ? "Administrador"
+    : state.profile.rol === "preequipo" ? "Coordinador de pre-equipo"
+    : "Coordinador · " + sedeNombre(state.profile.sede_id);
   abrirModal(`
     <div style="text-align:center">
       <div class="ava" style="width:60px;height:60px;font-size:1.3rem;margin:0 auto 10px">${esc(iniciales(state.profile.nombre || state.user.email))}</div>
@@ -211,7 +215,8 @@ function mostrarApp() {
   $("#screen-app").classList.remove("hidden");
   $("#acct-ini").textContent = iniciales(state.profile.nombre || state.user.email);
   construirTabs();
-  const inicio = state.profile.rol === "admin" ? "tablero" : "alumnos";
+  const inicio = state.profile.rol === "admin" ? "tablero"
+    : state.profile.rol === "preequipo" ? "pre-candidatos" : "alumnos";
   navegar(inicio);
   // Notificaciones: genera recordatorios pendientes, carga inicial + refresco cada 60s
   revisarRecordatorios();
@@ -328,9 +333,11 @@ async function marcarUnaLeida(id) {
    NAVEGACIÓN / TABS
    ============================================================ */
 function tabsParaRol() {
-  return state.profile.rol === "admin"
-    ? [["tablero", "📊 Tablero"], ["alumnos", "🏊 Alumnos"], ["verificaciones", "📹 Verif."], ["config", "⚙️ Admin."]]
-    : [["alumnos", "🏊 Mis alumnos"]];
+  if (state.profile.rol === "admin")
+    return [["tablero", "📊 Tablero"], ["alumnos", "🏊 Alumnos"], ["verificaciones", "📹 Verif."], ["pre-supervision", "🥇 Pre-equipo"], ["config", "⚙️ Admin."]];
+  if (state.profile.rol === "preequipo")
+    return [["pre-candidatos", "👀 Candidatos"], ["pre-seguimiento", "🥇 Pre-equipo"]];
+  return [["alumnos", "🏊 Mis alumnos"]];
 }
 function construirTabs() {
   const nav = $("#tabs");
@@ -342,6 +349,11 @@ function construirTabs() {
 function navegar(route, extra = {}) {
   state.route = route;
   if (extra.alumnoId !== undefined) state.alumnoId = extra.alumnoId;
+  if (extra.preId !== undefined) state.preId = extra.preId;
+  // Cada solapa del pre-equipo fija su filtro de estado
+  if (route === "pre-candidatos") state.preFiltro = "candidato";
+  else if (route === "pre-seguimiento") state.preFiltro = "preequipo";
+  else if (route === "pre-supervision" && !state.preFiltro) state.preFiltro = "candidato";
   $("#tabs").querySelectorAll("button").forEach((b) =>
     b.classList.toggle("active", b.dataset.route === route));
   render();
@@ -358,6 +370,9 @@ async function render() {
     else if (state.route === "tablero") await viewTablero(v);
     else if (state.route === "verificaciones") await viewVerificaciones(v);
     else if (state.route === "config")  await viewConfig(v);
+    else if (state.route === "pre-candidatos" || state.route === "pre-seguimiento" || state.route === "pre-supervision") await viewPreequipoLista(v);
+    else if (state.route === "pre-alumno") await viewPreequipoFicha(v);
+    else if (state.route === "pre-nueva-obs") await viewPreequipoNuevaObs(v);
   } catch (err) {
     console.error(err);
     v.innerHTML = `<div class="card"><b style="color:var(--rojo)">Ocurrió un error</b><p class="small muted">${esc(err.message || err)}</p></div>`;
@@ -1074,7 +1089,7 @@ async function viewVerificaciones(v) {
 async function viewConfig(v) {
   const { data: profs, error } = await supa.from("profiles").select("*").order("rol");
   if (error) throw error;
-  const coords = profs.filter((p) => p.rol === "coordinador");
+  const coords = profs.filter((p) => p.rol === "coordinador" || p.rol === "preequipo");
 
   v.innerHTML = `
     <div class="card">
@@ -1116,16 +1131,25 @@ async function viewConfig(v) {
 
     <div class="card">
       <h3>Coordinadores</h3>
-      <p class="small muted">Asigná nombre y sede a cada coordinador. Los usuarios se crean en Supabase → Authentication.</p>
+      <p class="small muted">Asigná nombre, rol y sede a cada usuario. Los usuarios se crean en Supabase → Authentication. La "Sede" solo aplica a los coordinadores de sede.</p>
       ${coords.length ? coords.map((c) => `
-        <div class="row" style="align-items:flex-end;margin-bottom:10px;border-bottom:1px solid var(--borde);padding-bottom:10px">
-          <label class="field" style="margin:0"><span>Nombre</span><input data-cnombre="${c.id}" value="${esc(c.nombre || "")}"></label>
-          <label class="field" style="margin:0"><span>Sede</span>
-            <select data-csede="${c.id}">
-              <option value="">— Sin asignar —</option>
-              ${sedesOficiales().map((s) => `<option value="${s.id}" ${s.id === c.sede_id ? "selected" : ""}>${esc(s.nombre)}</option>`).join("")}
-            </select></label>
-          <button class="btn ghost sm" data-guardar-coord="${c.id}" style="flex:none">Guardar</button>
+        <div style="margin-bottom:12px;border-bottom:1px solid var(--borde);padding-bottom:12px">
+          <div class="row" style="align-items:flex-end">
+            <label class="field" style="margin:0"><span>Nombre</span><input data-cnombre="${c.id}" value="${esc(c.nombre || "")}"></label>
+            <label class="field" style="margin:0"><span>Rol</span>
+              <select data-crol="${c.id}">
+                <option value="coordinador" ${c.rol === "coordinador" ? "selected" : ""}>Coordinador de sede</option>
+                <option value="preequipo" ${c.rol === "preequipo" ? "selected" : ""}>Coordinador de pre-equipo</option>
+              </select></label>
+          </div>
+          <div class="row" style="align-items:flex-end;margin-top:8px">
+            <label class="field" style="margin:0"><span>Sede (solo coord. de sede)</span>
+              <select data-csede="${c.id}">
+                <option value="">— Sin asignar —</option>
+                ${sedesOficiales().map((s) => `<option value="${s.id}" ${s.id === c.sede_id ? "selected" : ""}>${esc(s.nombre)}</option>`).join("")}
+              </select></label>
+            <button class="btn ghost sm" data-guardar-coord="${c.id}" style="flex:none">Guardar</button>
+          </div>
         </div>`).join("")
         : `<p class="muted">No hay coordinadores todavía. Creálos en Supabase → Authentication → Users.</p>`}
     </div>`;
@@ -1143,10 +1167,13 @@ async function viewConfig(v) {
   v.querySelectorAll("[data-guardar-coord]").forEach((b) => b.addEventListener("click", async () => {
     const id = b.dataset.guardarCoord;
     const nombre = $(`[data-cnombre="${id}"]`).value.trim() || null;
-    const sede_id = $(`[data-csede="${id}"]`).value ? Number($(`[data-csede="${id}"]`).value) : null;
-    const { error } = await supa.from("profiles").update({ nombre, sede_id }).eq("id", id);
+    const rol = $(`[data-crol="${id}"]`).value;
+    // El coordinador de pre-equipo no tiene sede
+    const sede_id = rol === "preequipo" ? null
+      : ($(`[data-csede="${id}"]`).value ? Number($(`[data-csede="${id}"]`).value) : null);
+    const { error } = await supa.from("profiles").update({ nombre, rol, sede_id }).eq("id", id);
     if (error) { toast(error.message, "err"); return; }
-    toast("Coordinador actualizado", "ok");
+    toast("Usuario actualizado", "ok");
   }));
 
   // ----- Trimestres -----
@@ -1236,6 +1263,325 @@ function modalTrimestre(trim = null) {
     }
     cerrarModal(); toast(editar ? "Trimestre actualizado" : "Trimestre creado", "ok");
     await cargarContexto(); render();
+  });
+}
+
+/* ============================================================
+   SECCIÓN PRE-EQUIPO
+   ============================================================ */
+const preRubrica = (etapa) => (PREEQUIPO[etapa]?.rubrica) || [];
+const preUmbral = (etapa) => PREEQUIPO[etapa]?.umbral ?? 100;
+const preTotalItems = (etapa) => preRubrica(etapa).reduce((n, g) => n + g.items.length, 0);
+// etapa de evaluación según el estado del chico
+const etapaDeEstado = (estado) => estado === "candidato" ? "candidato" : "preequipo";
+
+function preResumen(marks, etapa) {
+  let nl = 0, pl = 0, l = 0, suma = 0, cargados = 0, total = 0;
+  for (const g of preRubrica(etapa)) for (const it of g.items) {
+    total++;
+    const v = marks[it.key];
+    if (v === undefined) continue;
+    cargados++; suma += v;
+    if (v === 0) nl++; else if (v === 0.5) pl++; else l++;
+  }
+  const pct = total ? Math.round((suma / total) * 1000) / 10 : 0;
+  return { nl, pl, l, suma, cargados, total, pct, completo: total > 0 && cargados === total };
+}
+
+const PRE_ESTADOS = {
+  candidato:  { label: "Candidato",         chip: "proc" },
+  preequipo:  { label: "En el pre-equipo",  chip: "" },
+  equipo:     { label: "Pasó al equipo ✅",  chip: "ok" },
+  baja:       { label: "Baja",              chip: "sin" },
+};
+const badgePreEstado = (e) => `<span class="badge ${PRE_ESTADOS[e]?.chip || "sin"}">${PRE_ESTADOS[e]?.label || e}</span>`;
+
+/* ---------- Lista (candidatos / pre-equipo / equipo / bajas) ---------- */
+async function viewPreequipoLista(v) {
+  const esAdmin = state.profile.rol === "admin";
+  const filtro = state.preFiltro || "candidato";
+
+  const { data: alumnos, error } = await supa.from("preequipo_alumnos").select("*").order("nombre");
+  if (error) throw error;
+
+  // % del mejor registro por alumno, en la etapa que le corresponde
+  const ids = (alumnos || []).map((a) => a.id);
+  let obsMap = {};
+  if (ids.length) {
+    const { data: obs } = await supa.from("preequipo_observaciones")
+      .select("alumno_id, etapa, porcentaje").in("alumno_id", ids);
+    (obs || []).forEach((o) => {
+      (obsMap[o.alumno_id] = obsMap[o.alumno_id] || []).push(o);
+    });
+  }
+  const mejorPct = (a) => {
+    const et = etapaDeEstado(a.estado);
+    const arr = (obsMap[a.id] || []).filter((o) => o.etapa === et).map((o) => Number(o.porcentaje));
+    return arr.length ? Math.max(...arr) : null;
+  };
+  const cuenta = (e) => (alumnos || []).filter((a) => a.estado === e).length;
+
+  const lista = (alumnos || []).filter((a) => a.estado === filtro);
+
+  const seg = (val, txt) => `<button class="btn ${filtro === val ? "primary" : "ghost"} sm" data-seg="${val}">${txt} <b>${cuenta(val)}</b></button>`;
+
+  v.innerHTML = `
+    <div class="card">
+      <div class="row" style="gap:6px">
+        ${seg("candidato", "Candidatos")}
+        ${seg("preequipo", "Pre-equipo")}
+        ${seg("equipo", "Pasaron al equipo")}
+        ${seg("baja", "Bajas")}
+      </div>
+    </div>
+    ${(filtro === "candidato" && state.profile.rol === "preequipo")
+      ? `<button class="btn primary block no-print" id="btn-nuevo-cand" style="margin-bottom:14px">＋ Nuevo candidato</button>` : ""}
+    <div id="pre-lista"></div>`;
+
+  const cont = $("#pre-lista");
+  if (!lista.length) {
+    cont.innerHTML = `<div class="card muted">No hay chicos en esta instancia.</div>`;
+  } else {
+    cont.innerHTML = lista.map((a) => {
+      const et = etapaDeEstado(a.estado);
+      const pct = mejorPct(a);
+      const apto = pct != null && pct >= preUmbral(et);
+      const marca = (a.estado === "candidato" && apto) ? `<span class="badge ok">✓ Apto para invitar</span>`
+        : (a.estado === "preequipo" && apto) ? `<span class="badge ok">✓ Listo para el equipo</span>` : "";
+      return `<div class="alumno" data-id="${a.id}">
+        <div class="ava">${esc(iniciales(a.nombre))}</div>
+        <div class="info"><b>${esc(a.nombre)}</b>
+          <div class="small muted">${a.edad ? a.edad + " años · " : ""}${(obsMap[a.id] || []).filter((o) => o.etapa === et).length} obs. ${marca}</div>
+        </div>
+        <div class="pct"><div class="n">${pct == null ? "—" : pct + "%"}</div>
+          <div class="small muted">umbral ${preUmbral(et)}%</div></div>
+      </div>`;
+    }).join("");
+    cont.querySelectorAll(".alumno").forEach((el) =>
+      el.addEventListener("click", () => navegar("pre-alumno", { preId: Number(el.dataset.id) })));
+  }
+
+  v.querySelectorAll("[data-seg]").forEach((b) => b.addEventListener("click", () => {
+    state.preFiltro = b.dataset.seg; render();
+  }));
+  $("#btn-nuevo-cand")?.addEventListener("click", () => modalPreAlumno());
+}
+
+/* ---------- Ficha de un chico del pre-equipo ---------- */
+async function viewPreequipoFicha(v) {
+  const id = state.preId;
+  const [{ data: a, error: e1 }, { data: obs, error: e2 }] = await Promise.all([
+    supa.from("preequipo_alumnos").select("*").eq("id", id).single(),
+    supa.from("preequipo_observaciones").select("*").eq("alumno_id", id).order("fecha").order("creado"),
+  ]);
+  if (e1) throw e1; if (e2) throw e2;
+  const et = etapaDeEstado(a.estado);
+  const obsEtapa = (obs || []).filter((o) => o.etapa === et);
+  const pct = obsEtapa.length ? Math.max(...obsEtapa.map((o) => Number(o.porcentaje))) : null;
+  const umbral = preUmbral(et);
+  const apto = pct != null && pct >= umbral;
+  const activo = a.estado === "candidato" || a.estado === "preequipo";  // etapas con evaluación en curso
+
+  const filas = obsEtapa.map((o, i) => `<tr>
+    <td>${i + 1}ª</td><td>${fmtFecha(o.fecha)}</td><td><b>${o.porcentaje}%</b> ${Number(o.porcentaje) >= umbral ? "✓" : ""}</td>
+    <td class="no-print" style="white-space:nowrap">
+      <button class="btn ghost sm" data-verpre="${o.id}">Ver</button>
+      <button class="btn ghost sm" data-delpre="${o.id}" title="Eliminar" style="color:var(--rojo)">🗑</button>
+    </td></tr>`).join("");
+
+  // Acciones según el estado
+  let acciones = "";
+  if (a.estado === "candidato") {
+    acciones = `<button class="btn primary" id="btn-invitar">✅ Invitó y aceptó → pasar al Pre-equipo</button>
+                <button class="btn ghost" id="btn-baja">Dar de baja</button>`;
+  } else if (a.estado === "preequipo") {
+    acciones = `<button class="btn primary" id="btn-a-equipo">🏆 Aceptó → pasó al Equipo oficial</button>
+                <button class="btn ghost" id="btn-baja">Dar de baja</button>`;
+  } else if (a.estado === "baja") {
+    acciones = `<button class="btn ghost" id="btn-reactivar">Reactivar como candidato</button>`;
+  }
+
+  v.innerHTML = `
+    <button class="btn ghost sm no-print" id="pre-volver" style="margin-bottom:12px">← Volver</button>
+    ${a.estado === "equipo" ? `<div class="banner-aprobado"><span class="big">🏆 ¡PASÓ AL EQUIPO OFICIAL!</span>
+      <span class="sub">Caso exitoso. Ya no está en observación del pre-equipo.</span></div>` : ""}
+    <div class="card ${a.estado === "equipo" ? "ficha-aprobado" : ""}">
+      <div style="display:flex;gap:14px;align-items:center">
+        <div class="ava" style="width:54px;height:54px;font-size:1.1rem">${esc(iniciales(a.nombre))}</div>
+        <div style="flex:1"><h2 style="margin:0">${esc(a.nombre)}</h2>
+          <div class="small muted">${a.edad ? a.edad + " años · " : ""}${badgePreEstado(a.estado)}</div>
+        </div>
+      </div>
+      ${activo ? `<div class="row" style="text-align:center;margin-top:10px">
+        <div class="kpi ${apto ? "good" : ""}"><div class="n">${pct == null ? "—" : pct + "%"}</div><div class="l">Mejor registro</div></div>
+        <div class="kpi"><div class="n">${umbral}%</div><div class="l">Umbral de éxito</div></div>
+      </div>
+      ${apto ? `<p class="small" style="color:var(--verde);text-align:center;margin:8px 0 0"><b>${a.estado === "candidato" ? "Apto para invitar al pre-equipo." : "Listo para pasar al equipo oficial."}</b></p>` : ""}` : ""}
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <h3 style="margin:0;flex:1">${et === "candidato" ? "Evaluación de candidato" : "Seguimiento"} (${obsEtapa.length})</h3>
+        ${activo ? `<button class="btn agua sm no-print" id="btn-pre-nueva">＋ Nueva</button>` : ""}
+      </div>
+      ${obsEtapa.length ? `<div class="tabla-scroll"><table class="tbl"><thead><tr><th>#</th><th>Fecha</th><th>%</th><th class="no-print"></th></tr></thead><tbody>${filas}</tbody></table></div>`
+        : `<p class="muted">Todavía no hay observaciones en esta instancia.</p>`}
+    </div>
+
+    ${acciones ? `<div class="card no-print"><div class="row">${acciones}</div></div>` : ""}
+    <div class="no-print" style="text-align:center;margin-top:10px">
+      <button class="btn ghost sm" id="btn-pre-editar">✏️ Editar datos</button>
+      <button class="btn danger sm" id="btn-pre-eliminar">🗑 Eliminar</button>
+    </div>`;
+
+  $("#pre-volver").addEventListener("click", () => navegar(state.profile.rol === "admin" ? "pre-supervision" : (a.estado === "candidato" ? "pre-candidatos" : "pre-seguimiento")));
+  $("#btn-pre-nueva")?.addEventListener("click", () => navegar("pre-nueva-obs", { preId: id }));
+  $("#btn-pre-editar").addEventListener("click", () => modalPreAlumno(a));
+
+  const cambiarEstado = async (campos, msg) => {
+    const { error } = await supa.from("preequipo_alumnos").update(campos).eq("id", id);
+    if (error) { toast(error.message, "err"); return; }
+    toast(msg, "ok"); render();
+  };
+  $("#btn-invitar")?.addEventListener("click", () => confirmar(
+    "Pasar al pre-equipo", `Confirmás que ${a.nombre} aceptó la invitación y pasa al pre-equipo?`,
+    async () => { cerrarModal(); await cambiarEstado({ estado: "preequipo", fecha_invitacion: hoyISO() }, "¡Pasó al pre-equipo!"); }));
+  $("#btn-a-equipo")?.addEventListener("click", () => confirmar(
+    "Pasar al equipo oficial", `Confirmás que ${a.nombre} aceptó y pasa al Equipo oficial? Se cierra como caso exitoso.`,
+    async () => { cerrarModal(); await cambiarEstado({ estado: "equipo", fecha_paso_equipo: hoyISO() }, "🏆 ¡Pasó al equipo!"); }));
+  $("#btn-baja")?.addEventListener("click", () => confirmar(
+    "Dar de baja", `Confirmás dar de baja a ${a.nombre}? (podés reactivarlo después)`,
+    async () => { cerrarModal(); await cambiarEstado({ estado: "baja" }, "Dado de baja"); }));
+  $("#btn-reactivar")?.addEventListener("click", async () => cambiarEstado({ estado: "candidato" }, "Reactivado como candidato"));
+  $("#btn-pre-eliminar").addEventListener("click", () => confirmar(
+    `¿Eliminar a ${a.nombre}?`, "Se borra el chico y todas sus observaciones. No se puede deshacer.",
+    async () => {
+      const { error } = await supa.from("preequipo_alumnos").delete().eq("id", id);
+      if (error) { toast(error.message, "err"); return; }
+      cerrarModal(); toast("Eliminado", "ok");
+      navegar(state.profile.rol === "admin" ? "pre-supervision" : "pre-candidatos");
+    }));
+
+  v.querySelectorAll("[data-verpre]").forEach((b) =>
+    b.addEventListener("click", () => modalVerPreObs(obs.find((o) => o.id == b.dataset.verpre))));
+  v.querySelectorAll("[data-delpre]").forEach((b) => b.addEventListener("click", () => confirmar(
+    "¿Eliminar la observación?", "No se puede deshacer.",
+    async () => {
+      const { error } = await supa.from("preequipo_observaciones").delete().eq("id", b.dataset.delpre);
+      if (error) { toast(error.message, "err"); return; }
+      cerrarModal(); toast("Observación eliminada", "ok"); render();
+    })));
+}
+
+function modalVerPreObs(o) {
+  const filas = preRubrica(o.etapa).map((g) => `
+    <div class="eval-grupo"><h4>${esc(g.cat)}</h4>
+    ${g.items.map((it) => {
+      const val = VALORES.find((x) => x.v === o.items[it.key]);
+      return `<div class="eval-item"><span class="nm">${esc(it.label)}</span>
+        <span class="badge ${val?.clase === "v-l" ? "ok" : val?.clase === "v-pl" ? "proc" : "sin"}">${val?.sigla || "—"}</span></div>`;
+    }).join("")}</div>`).join("");
+  abrirModal(`<h3>Observación · ${fmtFecha(o.fecha)}</h3>
+    <p class="muted small">Resultado: <b>${o.porcentaje}%</b></p>
+    ${filas}
+    ${o.notas ? `<div class="eval-grupo"><h4>Notas</h4><p style="white-space:pre-wrap;margin:0">${esc(o.notas)}</p></div>` : ""}
+    <div class="modal-actions"><button class="btn primary" id="cerrar-verpre">Cerrar</button></div>`);
+  $("#cerrar-verpre").addEventListener("click", cerrarModal);
+}
+
+/* ---------- Nueva observación de pre-equipo ---------- */
+async function viewPreequipoNuevaObs(v) {
+  const id = state.preId;
+  const { data: a, error } = await supa.from("preequipo_alumnos").select("*").eq("id", id).single();
+  if (error) throw error;
+  const etapa = etapaDeEstado(a.estado);
+  const total = preTotalItems(etapa);
+
+  const { data: prev } = await supa.from("preequipo_observaciones").select("items")
+    .eq("alumno_id", id).eq("etapa", etapa).order("fecha", { ascending: false }).order("creado", { ascending: false }).limit(1).maybeSingle();
+  const marks = prev?.items ? { ...prev.items } : {};
+
+  v.innerHTML = `
+    <button class="btn ghost sm no-print" id="pre-cancelar" style="margin-bottom:12px">← Cancelar</button>
+    <div class="card">
+      <h3 style="margin:0">Nueva observación · ${etapa === "candidato" ? "Candidato" : "Seguimiento"}</h3>
+      <div class="small muted">${esc(a.nombre)}</div>
+      <label class="field" style="margin-top:12px;max-width:220px"><span>Fecha</span>
+        <input type="date" id="pre-fecha" value="${hoyISO()}" max="${hoyISO()}"></label>
+      ${total === 0 ? `<p class="small" style="background:var(--amarillo-bg);color:var(--amarillo);padding:10px 12px;border-radius:10px">⚠️ Esta rúbrica todavía no tiene ítems definidos. Cargalos en <b>config.js</b> para poder evaluar.</p>` : ""}
+      <div id="pre-rubrica"></div>
+      <label class="field" style="margin-top:14px"><span>Notas (opcional)</span><textarea id="pre-notas"></textarea></label>
+    </div>
+    <div class="eval-bar">
+      <div class="res"><div class="small muted"><span id="pre-cargados">0</span>/${total} ítems</div>
+        <div class="n"><span id="pre-pct">0</span>%</div></div>
+      <button class="btn primary" id="pre-guardar" disabled>Guardar</button>
+    </div>`;
+
+  const cont = $("#pre-rubrica");
+  cont.innerHTML = preRubrica(etapa).map((g) => `
+    <div class="eval-grupo"><h4>${esc(g.cat)}</h4>
+      ${g.items.map((it) => `<div class="eval-item"><span class="nm">${esc(it.label)}</span>
+        <span class="eval-opts">${VALORES.map((val) => `<button class="opt ${val.clase}" data-key="${it.key}" data-v="${val.v}" title="${val.label}">${val.sigla}</button>`).join("")}</span>
+      </div>`).join("")}
+    </div>`).join("");
+
+  const refrescar = () => {
+    const r = preResumen(marks, etapa);
+    $("#pre-cargados").textContent = r.cargados; $("#pre-pct").textContent = r.pct;
+    $("#pre-guardar").disabled = !r.completo;
+  };
+  cont.querySelectorAll(".opt").forEach((b) => b.addEventListener("click", () => {
+    const key = b.dataset.key, val = Number(b.dataset.v);
+    marks[key] = val;
+    cont.querySelectorAll(`.opt[data-key="${key}"]`).forEach((x) => x.classList.toggle("sel", Number(x.dataset.v) === val));
+    refrescar();
+  }));
+  Object.entries(marks).forEach(([key, val]) =>
+    cont.querySelectorAll(`.opt[data-key="${key}"]`).forEach((x) => x.classList.toggle("sel", Number(x.dataset.v) === Number(val))));
+  refrescar();
+
+  $("#pre-cancelar").addEventListener("click", () => navegar("pre-alumno", { preId: id }));
+  $("#pre-guardar").addEventListener("click", async () => {
+    const r = preResumen(marks, etapa);
+    if (!r.completo) { toast("Faltan ítems por calificar", "err"); return; }
+    const btn = $("#pre-guardar"); btn.disabled = true; btn.textContent = "Guardando…";
+    const { error } = await supa.from("preequipo_observaciones").insert({
+      alumno_id: id, etapa, fecha: $("#pre-fecha").value || hoyISO(),
+      items: marks, notas: $("#pre-notas").value.trim() || null, creado_por: state.profile.id,
+    });
+    if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = "Guardar"; return; }
+    toast(`Observación guardada: ${r.pct}%`, "ok");
+    navegar("pre-alumno", { preId: id });
+  });
+}
+
+/* ---------- Alta / edición de chico del pre-equipo ---------- */
+function modalPreAlumno(a = null) {
+  const editar = !!a;
+  abrirModal(`
+    <h3>${editar ? "Editar" : "Nuevo candidato"}</h3>
+    <label class="field"><span>Nombre y apellido *</span><input id="pa-nombre" value="${esc(a?.nombre || "")}"></label>
+    <label class="field" style="max-width:160px"><span>Edad</span><input id="pa-edad" type="number" min="4" max="18" value="${a?.edad ?? ""}"></label>
+    <div class="modal-actions">
+      <button class="btn ghost" id="pa-cancel">Cancelar</button>
+      <button class="btn primary" id="pa-guardar">${editar ? "Guardar" : "Crear candidato"}</button>
+    </div>`);
+  $("#pa-cancel").addEventListener("click", cerrarModal);
+  $("#pa-guardar").addEventListener("click", async () => {
+    const nombre = $("#pa-nombre").value.trim();
+    if (!nombre) { toast("Poné el nombre", "err"); return; }
+    const payload = { nombre, edad: $("#pa-edad").value ? Number($("#pa-edad").value) : null };
+    let error;
+    if (editar) {
+      ({ error } = await supa.from("preequipo_alumnos").update(payload).eq("id", a.id));
+    } else {
+      payload.coordinador_id = state.profile.id;
+      payload.trimestre_id = state.trimestreActivo?.id ?? null;
+      ({ error } = await supa.from("preequipo_alumnos").insert(payload));
+    }
+    if (error) { toast(error.message, "err"); return; }
+    cerrarModal(); toast(editar ? "Actualizado" : "Candidato creado", "ok"); render();
   });
 }
 
