@@ -7,6 +7,9 @@ window.BUCOR_CONFIG = {
   SUPABASE_URL: "https://hvzcoforknrjsuhmezub.supabase.co",
   SUPABASE_ANON_KEY:
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh2emNvZm9ya25yanN1aG1lenViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMjE0NDQsImV4cCI6MjA5Nzg5NzQ0NH0.kZpRhGeZS1MpQW2ToyG49zSRI9c-zENXitF5TosOHUg",
+  // Clave pública VAPID para notificaciones push (es pública por diseño)
+  VAPID_PUBLIC_KEY:
+    "BCjQDFN-RhSPYNd5OqniSaK7-fOXy4NWVt5xxI8ZyT3qi9jOIgV1nrhzHOUEYmJdr17AkEaGLYpprddyLFISj7E",
 };
 
 // Valores de calificación

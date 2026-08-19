@@ -157,10 +157,12 @@ function modalCuenta() {
       <p class="muted small" style="margin:4px 0 0">${esc(rol)}</p>
       <p class="muted small" style="margin:2px 0 0">${esc(state.user.email)}</p>
     </div>
-    <div class="modal-actions" style="justify-content:center;margin-top:18px">
+    <button class="btn ghost block" id="acct-push" style="margin-top:16px">🔔 Activar avisos en este celular</button>
+    <div class="modal-actions" style="justify-content:center;margin-top:14px">
       <button class="btn ghost" id="acct-cerrar">Cerrar</button>
       <button class="btn danger" id="acct-salir">Cerrar sesión</button>
     </div>`);
+  $("#acct-push").addEventListener("click", () => activarPush(true));
   $("#acct-cerrar").addEventListener("click", cerrarModal);
   $("#acct-salir").addEventListener("click", async () => { cerrarModal(); await supa.auth.signOut(); });
 }
@@ -224,6 +226,8 @@ function mostrarApp() {
   notifTimer = setInterval(cargarNotificaciones, 60000);
   // Saludo de bienvenida (solo una vez por ingreso)
   mostrarBienvenida();
+  // Notificaciones push al panel del celular (pide permiso la 1ª vez)
+  activarPush();
 }
 
 /* ============================================================
@@ -326,6 +330,57 @@ async function marcarUnaLeida(id) {
   if (n && !n.leida) {
     await supa.from("notificaciones").update({ leida: true }).eq("id", id);
     n.leida = true; pintarCampana();
+  }
+}
+
+/* ============================================================
+   NOTIFICACIONES PUSH (avisos en el panel del celular)
+   ============================================================ */
+function urlB64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+function bufToB64Url(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Pide permiso (si hace falta), suscribe el dispositivo y guarda la suscripción en la base.
+async function activarPush(interactivo = false) {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      if (interactivo) toast("Este dispositivo no soporta notificaciones push", "err");
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") {
+      if (interactivo) toast("No se activaron: falta dar permiso de notificaciones", "err");
+      return;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(CFG.VAPID_PUBLIC_KEY),
+      });
+    }
+    await supa.from("push_subscriptions").upsert({
+      endpoint: sub.endpoint,
+      p256dh: bufToB64Url(sub.getKey("p256dh")),
+      auth: bufToB64Url(sub.getKey("auth")),
+      usuario_id: state.profile.id,
+    }, { onConflict: "endpoint" });
+    if (interactivo) toast("Notificaciones activadas en este dispositivo ✅", "ok");
+  } catch (e) {
+    if (interactivo) toast("No se pudieron activar: " + (e.message || e), "err");
   }
 }
 
