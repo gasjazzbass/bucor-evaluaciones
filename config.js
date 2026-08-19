@@ -93,16 +93,40 @@ window.BUCOR_HORARIOS = Array.from({ length: 15 }, (_, i) => `${i + 7} a ${i + 8
    ⚠️ PENDIENTE: reemplazar ítems y umbrales por los definitivos.
    ============================================================ */
 window.BUCOR_PREEQUIPO = {
-  // Etapa 1: evaluación de candidatos a ser invitados al pre-equipo
+  // Etapa 1: evaluación de candidatos a ser invitados al pre-equipo (20 ítems, aprueba con 80%)
   candidato: {
     titulo: "Evaluación de candidato",
-    umbral: 70,   // % de éxito (a definir)
+    umbral: 80,   // 16 de 20 puntos
     rubrica: [
-      { cat: "Ítems a definir", items: [
-        { key: "cand_1", label: "Ítem 1 (a definir)" },
-        { key: "cand_2", label: "Ítem 2 (a definir)" },
-        { key: "cand_3", label: "Ítem 3 (a definir)" },
-        { key: "cand_4", label: "Ítem 4 (a definir)" },
+      { cat: "Crol", items: [
+        { key: "cand_crol_respiracion", label: "Respiración" },
+        { key: "cand_crol_patada",      label: "Patada" },
+        { key: "cand_crol_brazada",     label: "Brazada" },
+        { key: "cand_crol_nado",        label: "Nado continuo" },
+      ]},
+      { cat: "Espalda", items: [
+        { key: "cand_esp_flotacion", label: "Línea de flotación" },
+        { key: "cand_esp_patada",    label: "Patada" },
+        { key: "cand_esp_brazada",   label: "Brazada" },
+        { key: "cand_esp_nado",      label: "Nado continuo" },
+      ]},
+      { cat: "Mariposa", items: [
+        { key: "cand_mar_onda",  label: "Onda delfín" },
+        { key: "cand_mar_coord", label: "Coordinación movimientos" },
+        { key: "cand_mar_nado",  label: "Nado continuo" },
+      ]},
+      { cat: "Patada Pecho", items: [
+        { key: "cand_pecho_armado", label: "Armado" },
+        { key: "cand_pecho_empuje", label: "Empuje" },
+        { key: "cand_pecho_pausa",  label: "Pausa" },
+        { key: "cand_pecho_nado",   label: "Nado continuo" },
+      ]},
+      { cat: "Habilidades complementarias", items: [
+        { key: "cand_hab_buceo",     label: "Buceo / nado subacuático" },
+        { key: "cand_hab_largada",   label: "Largada de cabeza" },
+        { key: "cand_hab_flotacion", label: "Flotación estática" },
+        { key: "cand_hab_flecha",    label: "Empuje de pared y flecha" },
+        { key: "cand_hab_andarivel", label: "Manejo del andarivel" },
       ]},
     ],
   },
