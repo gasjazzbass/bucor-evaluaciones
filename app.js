@@ -762,11 +762,13 @@ function htmlVerificacion({ verif, esCoord, url1, url2 }) {
   } else { // admin
     cuerpo = !verif
       ? `<p class="muted">El coordinador todavía no subió los videos.</p>`
-      : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="verif-coment">${esc(verif.comentario || "")}</textarea></label>
-         <div class="row no-print">
-           <button class="btn primary" id="btn-verificar">✔ Verificar</button>
-           <button class="btn danger" id="btn-rechazar">✖ Rechazar</button>
-         </div>`;
+      : estado === "verificado"
+        ? `<p class="small" style="color:var(--verde)"><b>✔ Verificado.</b> Trámite completo.</p>`
+        : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="verif-coment">${esc(verif.comentario || "")}</textarea></label>
+           <div class="row no-print">
+             <button class="btn primary" id="btn-verificar">✔ Verificar</button>
+             <button class="btn danger" id="btn-rechazar">✖ Rechazar</button>
+           </div>`;
   }
 
   return `<div class="card" style="border:2px solid ${borde}">
@@ -776,6 +778,7 @@ function htmlVerificacion({ verif, esCoord, url1, url2 }) {
     </div>
     ${videos}
     ${cuerpo}
+    ${verif ? `<div class="no-print" style="margin-top:10px;text-align:right"><button class="btn ghost sm" id="btn-eliminar-videos" style="color:var(--rojo)">🗑 Eliminar videos</button></div>` : ""}
   </div>`;
 }
 
@@ -820,6 +823,17 @@ function wireVerificacion(id, verif, esCoord) {
     $("#btn-verificar")?.addEventListener("click", () => revisar("verificado"));
     $("#btn-rechazar")?.addEventListener("click", () => revisar("rechazado"));
   }
+  // Eliminar videos (coordinador y admin)
+  $("#btn-eliminar-videos")?.addEventListener("click", () => confirmar(
+    "¿Eliminar los videos?",
+    "Se borran los videos cargados y su verificación. Para volver a tenerlos, el coordinador tendrá que subirlos de nuevo.",
+    async () => {
+      const paths = [verif?.video1_path, verif?.video2_path].filter(Boolean);
+      if (paths.length) await supa.storage.from("verificaciones").remove(paths);
+      const { error } = await supa.from("verificaciones").delete().eq("alumno_id", id);
+      if (error) { toast(error.message, "err"); return; }
+      cerrarModal(); toast("Videos eliminados", "ok"); render();
+    }));
 }
 
 /* ---------- video inicial: HTML + eventos (espeja la verificación, 1 solo video) ---------- */
@@ -840,11 +854,13 @@ function htmlVideoInicial({ vi, esCoord, url }) {
   } else { // admin
     cuerpo = !vi
       ? `<p class="muted">El coordinador todavía no subió el video inicial.</p>`
-      : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="vi-coment">${esc(vi.comentario || "")}</textarea></label>
-         <div class="row no-print">
-           <button class="btn primary" id="btn-vi-verificar">✔ Verificar</button>
-           <button class="btn danger" id="btn-vi-rechazar">✖ Rechazar</button>
-         </div>`;
+      : estado === "verificado"
+        ? `<p class="small" style="color:var(--verde)"><b>✔ Verificado.</b> Registro listo.</p>`
+        : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="vi-coment">${esc(vi.comentario || "")}</textarea></label>
+           <div class="row no-print">
+             <button class="btn primary" id="btn-vi-verificar">✔ Verificar</button>
+             <button class="btn danger" id="btn-vi-rechazar">✖ Rechazar</button>
+           </div>`;
   }
 
   return `<div class="card" style="border:2px solid ${borde}">
@@ -854,6 +870,7 @@ function htmlVideoInicial({ vi, esCoord, url }) {
     </div>
     ${video}
     ${cuerpo}
+    ${vi ? `<div class="no-print" style="margin-top:10px;text-align:right"><button class="btn ghost sm" id="btn-eliminar-inicial" style="color:var(--rojo)">🗑 Eliminar video</button></div>` : ""}
   </div>`;
 }
 
@@ -894,6 +911,16 @@ function wireVideoInicial(id, vi, esCoord) {
     $("#btn-vi-verificar")?.addEventListener("click", () => revisar("verificado"));
     $("#btn-vi-rechazar")?.addEventListener("click", () => revisar("rechazado"));
   }
+  // Eliminar video inicial (coordinador y admin)
+  $("#btn-eliminar-inicial")?.addEventListener("click", () => confirmar(
+    "¿Eliminar el video inicial?",
+    "Se borra el video cargado. Para volver a tenerlo, hay que subirlo de nuevo.",
+    async () => {
+      if (vi?.video_path) await supa.storage.from("verificaciones").remove([vi.video_path]);
+      const { error } = await supa.from("video_inicial").delete().eq("alumno_id", id);
+      if (error) { toast(error.message, "err"); return; }
+      cerrarModal(); toast("Video eliminado", "ok"); render();
+    }));
 }
 
 function modalVerObs(o) {
