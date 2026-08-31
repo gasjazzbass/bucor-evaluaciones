@@ -200,6 +200,22 @@ input:focus,select:focus,textarea:focus{outline:none; background:#fff; border-co
 .alumno.ap{border-color:var(--verde); background:linear-gradient(90deg,#eafaf0,#fff)}
 .alumno.ap .ava{background:var(--verde-bg); color:var(--verde)}
 
+/* ---------- Tarjeta que requiere acción (falta subir video) ---------- */
+.card.card-accion{
+  border:2px solid var(--amarillo) !important;
+  background:linear-gradient(160deg,#fffaf0,var(--amarillo-bg));
+  animation:pulso-accion 2.2s ease-in-out infinite;
+}
+@keyframes pulso-accion{
+  0%,100%{ box-shadow:0 0 0 0 rgba(184,134,11,0) }
+  50%{ box-shadow:0 0 0 6px rgba(184,134,11,.18) }
+}
+.card-accion h3{ color:var(--amarillo) }
+.card-accion .aviso-accion{
+  display:inline-block; background:var(--amarillo); color:#fff; font-weight:700;
+  font-size:.72rem; padding:3px 10px; border-radius:999px; margin-bottom:6px;
+}
+
 /* ---------- Tabla evaluación ---------- */
 .eval-grupo{margin-bottom:14px}
 .eval-grupo h4{margin:0 0 6px; color:var(--agua-osc); font-size:.82rem; text-transform:uppercase; letter-spacing:.5px}

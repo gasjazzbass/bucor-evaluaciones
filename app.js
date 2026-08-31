@@ -743,6 +743,7 @@ async function viewFichaAlumno(v) {
 /* ---------- verificación: HTML + eventos ---------- */
 function htmlVerificacion({ verif, esCoord, url1, url2 }) {
   const estado = verif?.estado;
+  const pide = esCoord && (!verif || estado === "rechazado");   // el coordinador todavía tiene que subirlos
   const borde = estado === "verificado" ? "var(--verde)" : estado === "pendiente" ? "var(--amarillo)"
     : estado === "rechazado" ? "var(--rojo)" : "var(--bucor)";
   const videos = (url1 || url2) ? `<div class="row" style="margin-top:8px">
@@ -771,9 +772,10 @@ function htmlVerificacion({ verif, esCoord, url1, url2 }) {
            </div>`;
   }
 
-  return `<div class="card" style="border:2px solid ${borde}">
+  return `<div class="card ${pide ? "card-accion" : ""}" style="border:2px solid ${borde}">
+    ${pide ? `<div class="aviso-accion no-print">⚠️ Acción requerida</div>` : ""}
     <div style="display:flex;align-items:center;gap:10px">
-      <h3 style="margin:0;flex:1">📹 Verificación por video</h3>
+      <h3 style="margin:0;flex:1">${pide ? "📹 ¡Faltan los videos de verificación!" : "📹 Verificación por video"}</h3>
       ${badgeVerif(estado)}
     </div>
     ${videos}
@@ -839,6 +841,7 @@ function wireVerificacion(id, verif, esCoord) {
 /* ---------- video inicial: HTML + eventos (espeja la verificación, 1 solo video) ---------- */
 function htmlVideoInicial({ vi, esCoord, url }) {
   const estado = vi?.estado;
+  const pide = esCoord && (!vi || estado === "rechazado");   // el coordinador todavía tiene que subirlo
   const borde = estado === "verificado" ? "var(--verde)" : estado === "pendiente" ? "var(--amarillo)"
     : estado === "rechazado" ? "var(--rojo)" : "var(--bucor)";
   const video = url ? `<div style="margin-top:8px"><video src="${url}" controls preload="metadata" style="width:100%;border-radius:10px;background:#000"></video></div>` : "";
@@ -863,9 +866,10 @@ function htmlVideoInicial({ vi, esCoord, url }) {
            </div>`;
   }
 
-  return `<div class="card" style="border:2px solid ${borde}">
+  return `<div class="card ${pide ? "card-accion" : ""}" style="border:2px solid ${borde}">
+    ${pide ? `<div class="aviso-accion no-print">⚠️ Acción requerida</div>` : ""}
     <div style="display:flex;align-items:center;gap:10px">
-      <h3 style="margin:0;flex:1">🎬 Video inicial</h3>
+      <h3 style="margin:0;flex:1">${pide ? "🎬 ¡Falta subir el video inicial!" : "🎬 Video inicial"}</h3>
       ${badgeVerif(estado)}
     </div>
     ${video}
