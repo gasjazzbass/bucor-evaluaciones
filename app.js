@@ -11,6 +11,9 @@ const ASISTENCIA = window.BUCOR_ASISTENCIA || [1, 2, 3];
 const DIAS = window.BUCOR_DIAS || [];
 const HORARIOS = window.BUCOR_HORARIOS || [];
 const PREEQUIPO = window.BUCOR_PREEQUIPO || { candidato: { umbral: 100, rubrica: [] }, preequipo: { umbral: 100, rubrica: [] } };
+const PRE_SEDES = window.BUCOR_PRE_SEDES || [];
+const PRE_DIAS = window.BUCOR_PRE_DIAS || [];
+const PRE_HORARIOS = window.BUCOR_PRE_HORARIOS || [];
 
 const supa = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
 
@@ -1496,6 +1499,12 @@ async function viewPreequipoFicha(v) {
         <div class="ava" style="width:54px;height:54px;font-size:1.1rem">${esc(iniciales(a.nombre))}</div>
         <div style="flex:1"><h2 style="margin:0">${esc(a.nombre)}</h2>
           <div class="small muted">${a.edad ? a.edad + " años · " : ""}${badgePreEstado(a.estado)}</div>
+          <div class="small muted">${[
+            a.sede_origen ? "Sede: " + a.sede_origen : null,
+            (Array.isArray(a.dias) && a.dias.length) ? a.dias.join(", ") : null,
+            a.horario ? a.horario + " hs" : null,
+            a.instructor ? "Prof. " + a.instructor : null,
+          ].filter(Boolean).map(esc).join(" · ")}</div>
         </div>
       </div>
       ${activo ? `<div class="row" style="text-align:center;margin-top:10px">
@@ -1645,10 +1654,26 @@ async function viewPreequipoNuevaObs(v) {
 /* ---------- Alta / edición de chico del pre-equipo ---------- */
 function modalPreAlumno(a = null) {
   const editar = !!a;
+  const diasSel = Array.isArray(a?.dias) ? a.dias : [];
   abrirModal(`
     <h3>${editar ? "Editar" : "Nuevo candidato"}</h3>
     <label class="field"><span>Nombre y apellido *</span><input id="pa-nombre" value="${esc(a?.nombre || "")}"></label>
-    <label class="field" style="max-width:160px"><span>Edad</span><input id="pa-edad" type="number" min="4" max="18" value="${a?.edad ?? ""}"></label>
+    <div class="row">
+      <label class="field" style="margin:0"><span>Edad</span><input id="pa-edad" type="number" min="4" max="18" value="${a?.edad ?? ""}"></label>
+      <label class="field" style="margin:0"><span>Sede de origen</span>
+        <select id="pa-sede"><option value="">— Elegir —</option>${opciones(PRE_SEDES, a?.sede_origen)}</select></label>
+    </div>
+    <div class="field"><span>Días de asistencia</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px">
+        ${PRE_DIAS.map((d) => `<label style="display:flex;align-items:center;gap:6px;font-weight:400">
+          <input type="checkbox" class="pa-dia" value="${esc(d)}" ${diasSel.includes(d) ? "checked" : ""} style="width:auto"> ${esc(d)}</label>`).join("")}
+      </div>
+    </div>
+    <div class="row">
+      <label class="field" style="margin:0"><span>Horario</span>
+        <select id="pa-horario"><option value="">— Elegir —</option>${opciones(PRE_HORARIOS, a?.horario)}</select></label>
+      <label class="field" style="margin:0"><span>Instructor a cargo</span><input id="pa-instructor" value="${esc(a?.instructor || "")}"></label>
+    </div>
     <div class="modal-actions">
       <button class="btn ghost" id="pa-cancel">Cancelar</button>
       <button class="btn primary" id="pa-guardar">${editar ? "Guardar" : "Crear candidato"}</button>
@@ -1657,7 +1682,15 @@ function modalPreAlumno(a = null) {
   $("#pa-guardar").addEventListener("click", async () => {
     const nombre = $("#pa-nombre").value.trim();
     if (!nombre) { toast("Poné el nombre", "err"); return; }
-    const payload = { nombre, edad: $("#pa-edad").value ? Number($("#pa-edad").value) : null };
+    const dias = [...document.querySelectorAll(".pa-dia:checked")].map((x) => x.value);
+    const payload = {
+      nombre,
+      edad: $("#pa-edad").value ? Number($("#pa-edad").value) : null,
+      sede_origen: $("#pa-sede").value || null,
+      dias: dias.length ? dias : null,
+      horario: $("#pa-horario").value || null,
+      instructor: $("#pa-instructor").value.trim() || null,
+    };
     let error;
     if (editar) {
       ({ error } = await supa.from("preequipo_alumnos").update(payload).eq("id", a.id));

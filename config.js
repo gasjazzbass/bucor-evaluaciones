@@ -95,6 +95,11 @@ window.BUCOR_HORARIOS = Array.from({ length: 15 }, (_, i) => `${i + 7} a ${i + 8
    PRE-EQUIPO · dos rúbricas (una por etapa) con umbral de éxito fijo
    ⚠️ PENDIENTE: reemplazar ítems y umbrales por los definitivos.
    ============================================================ */
+// Opciones precargadas de los datos del candidato de pre-equipo
+window.BUCOR_PRE_SEDES = ["Cerro", "Centro", "Ruta 20", "Arguello"];
+window.BUCOR_PRE_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+window.BUCOR_PRE_HORARIOS = ["17 a 18", "18 a 19", "19 a 20"];
+
 window.BUCOR_PREEQUIPO = {
   // Etapa 1: evaluación de candidatos a ser invitados al pre-equipo (20 ítems, aprueba con 80%)
   candidato: {
