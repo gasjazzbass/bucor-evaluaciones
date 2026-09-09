@@ -313,10 +313,14 @@ function modalNotificaciones() {
   $("#notif-cerrar").addEventListener("click", cerrarModal);
   $("#notif-todas")?.addEventListener("click", async () => { await marcarLeidas(); cerrarModal(); });
   $("#notif-lista").querySelectorAll(".notif-item").forEach((el) => el.addEventListener("click", async () => {
-    await marcarUnaLeida(Number(el.dataset.id));
+    const nid = Number(el.dataset.id);
+    await marcarUnaLeida(nid);
     const alumnoId = el.dataset.alumno ? Number(el.dataset.alumno) : null;
+    const tipo = state.notifs.find((x) => x.id === nid)?.tipo;
+    const scrollTo = tipo === "video_comentario" ? "coment-cierre"
+      : tipo === "video_inicial_comentario" ? "coment-inicial" : null;
     cerrarModal();
-    if (alumnoId) navegar("alumno", { alumnoId });
+    if (alumnoId) navegar("alumno", { alumnoId, scrollTo });
   }));
 }
 
@@ -408,6 +412,7 @@ function navegar(route, extra = {}) {
   state.route = route;
   if (extra.alumnoId !== undefined) state.alumnoId = extra.alumnoId;
   if (extra.preId !== undefined) state.preId = extra.preId;
+  state.scrollTo = extra.scrollTo || null;   // ancla a la que saltar tras renderizar (deep-link)
   // Cada solapa del pre-equipo fija su filtro de estado
   if (route === "pre-candidatos") state.preFiltro = "candidato";
   else if (route === "pre-seguimiento") state.preFiltro = "preequipo";
@@ -741,6 +746,19 @@ async function viewFichaAlumno(v) {
 
   if (est.aprobado) wireVerificacion(id, verif, esCoord);
   if (obs.length >= 1) wireVideoInicial(id, vi, esCoord);
+
+  // Deep-link: si vengo de una notificación de comentario, salto y resalto el comentario
+  if (state.scrollTo) {
+    const destino = state.scrollTo; state.scrollTo = null;
+    requestAnimationFrame(() => {
+      const elc = document.getElementById(destino);
+      if (elc) {
+        elc.scrollIntoView({ behavior: "smooth", block: "center" });
+        elc.classList.add("flash");
+        setTimeout(() => elc.classList.remove("flash"), 2600);
+      }
+    });
+  }
 }
 
 /* ---------- verificación: HTML + eventos ---------- */
@@ -758,7 +776,8 @@ function htmlVerificacion({ verif, esCoord, url1, url2 }) {
   if (esCoord) {
     cuerpo = estado === "verificado"
       ? `<p class="small muted">✔ El administrador verificó los videos. ¡Trámite completo!</p>`
-      : `${estado === "rechazado" && verif?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(verif.comentario)}</b></p>` : ""}
+      : `${verif?.comentario_admin ? `<div class="coment-admin" id="coment-cierre">💬 <b>Comentario del administrador:</b> ${esc(verif.comentario_admin)}</div>` : ""}
+         ${estado === "rechazado" && verif?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(verif.comentario)}</b></p>` : ""}
          <p class="small muted">El alumno alcanzó el objetivo. Subí <b>2 videos cortos</b> (máx. 50 MB c/u) donde se lo vea nadando, para que el administrador verifique.</p>
          <label class="field"><span>Video 1</span><input type="file" id="vid1" accept="video/*"></label>
          <label class="field"><span>Video 2</span><input type="file" id="vid2" accept="video/*"></label>
@@ -772,6 +791,10 @@ function htmlVerificacion({ verif, esCoord, url1, url2 }) {
            <div class="row no-print">
              <button class="btn primary" id="btn-verificar">✔ Verificar</button>
              <button class="btn danger" id="btn-rechazar">✖ Rechazar</button>
+           </div>
+           <div class="coment-envio no-print">
+             <label class="field"><span>💬 Comentario para el coordinador</span><textarea id="verif-coment-admin" placeholder="Escribí un comentario y avisale al coordinador…">${esc(verif.comentario_admin || "")}</textarea></label>
+             <button class="btn agua sm" id="btn-coment-verif">Enviar comentario al coordinador</button>
            </div>`;
   }
 
@@ -827,6 +850,16 @@ function wireVerificacion(id, verif, esCoord) {
     };
     $("#btn-verificar")?.addEventListener("click", () => revisar("verificado"));
     $("#btn-rechazar")?.addEventListener("click", () => revisar("rechazado"));
+    $("#btn-coment-verif")?.addEventListener("click", async () => {
+      const txt = $("#verif-coment-admin").value.trim();
+      if (!txt) { toast("Escribí un comentario", "err"); return; }
+      const btn = $("#btn-coment-verif"); btn.disabled = true; btn.textContent = "Enviando…";
+      const { error } = await supa.from("verificaciones").update({
+        comentario_admin: txt, comentario_admin_en: new Date().toISOString(),
+      }).eq("alumno_id", id);
+      if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = "Enviar comentario al coordinador"; return; }
+      toast("Comentario enviado al coordinador ✔", "ok"); render();
+    });
   }
   // Eliminar videos (coordinador y admin)
   $("#btn-eliminar-videos")?.addEventListener("click", () => confirmar(
@@ -853,7 +886,8 @@ function htmlVideoInicial({ vi, esCoord, url }) {
   if (esCoord) {
     cuerpo = estado === "verificado"
       ? `<p class="small muted">✔ El administrador verificó el video inicial. ¡Registro listo!</p>`
-      : `${estado === "rechazado" && vi?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(vi.comentario)}</b></p>` : ""}
+      : `${vi?.comentario_admin ? `<div class="coment-admin" id="coment-inicial">💬 <b>Comentario del administrador:</b> ${esc(vi.comentario_admin)}</div>` : ""}
+         ${estado === "rechazado" && vi?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(vi.comentario)}</b></p>` : ""}
          <p class="small muted">Registrá el <b>punto de partida</b> del alumno: subí <b>1 video corto</b> (máx. 50 MB) donde se vea su nivel inicial, para contrastarlo al lograr el objetivo.</p>
          <label class="field"><span>Video inicial</span><input type="file" id="vi-file" accept="video/*"></label>
          <button class="btn primary no-print" id="btn-subir-inicial">${vi ? "Reemplazar video" : "Subir video"}</button>`;
@@ -866,6 +900,10 @@ function htmlVideoInicial({ vi, esCoord, url }) {
            <div class="row no-print">
              <button class="btn primary" id="btn-vi-verificar">✔ Verificar</button>
              <button class="btn danger" id="btn-vi-rechazar">✖ Rechazar</button>
+           </div>
+           <div class="coment-envio no-print">
+             <label class="field"><span>💬 Comentario para el coordinador</span><textarea id="vi-coment-admin" placeholder="Escribí un comentario y avisale al coordinador…">${esc(vi.comentario_admin || "")}</textarea></label>
+             <button class="btn agua sm" id="btn-coment-vi">Enviar comentario al coordinador</button>
            </div>`;
   }
 
@@ -917,6 +955,16 @@ function wireVideoInicial(id, vi, esCoord) {
     };
     $("#btn-vi-verificar")?.addEventListener("click", () => revisar("verificado"));
     $("#btn-vi-rechazar")?.addEventListener("click", () => revisar("rechazado"));
+    $("#btn-coment-vi")?.addEventListener("click", async () => {
+      const txt = $("#vi-coment-admin").value.trim();
+      if (!txt) { toast("Escribí un comentario", "err"); return; }
+      const btn = $("#btn-coment-vi"); btn.disabled = true; btn.textContent = "Enviando…";
+      const { error } = await supa.from("video_inicial").update({
+        comentario_admin: txt, comentario_admin_en: new Date().toISOString(),
+      }).eq("alumno_id", id);
+      if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = "Enviar comentario al coordinador"; return; }
+      toast("Comentario enviado al coordinador ✔", "ok"); render();
+    });
   }
   // Eliminar video inicial (coordinador y admin)
   $("#btn-eliminar-inicial")?.addEventListener("click", () => confirmar(

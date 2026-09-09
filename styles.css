@@ -216,6 +216,20 @@ input:focus,select:focus,textarea:focus{outline:none; background:#fff; border-co
   font-size:.72rem; padding:3px 10px; border-radius:999px; margin-bottom:6px;
 }
 
+/* ---------- Comentario del administrador ---------- */
+.coment-admin{
+  background:var(--celeste); border:1px solid var(--bucor); border-radius:12px;
+  padding:10px 12px; margin:8px 0; font-size:.92rem; color:var(--azul); line-height:1.4;
+}
+.coment-envio{
+  margin-top:12px; padding-top:12px; border-top:1px dashed var(--borde);
+}
+.flash{ animation:flash-coment 2.4s ease }
+@keyframes flash-coment{
+  0%,100%{ box-shadow:0 0 0 0 rgba(87,187,255,0) }
+  15%,55%{ box-shadow:0 0 0 5px rgba(87,187,255,.45) }
+}
+
 /* ---------- Tabla evaluación ---------- */
 .eval-grupo{margin-bottom:14px}
 .eval-grupo h4{margin:0 0 6px; color:var(--agua-osc); font-size:.82rem; text-transform:uppercase; letter-spacing:.5px}
