@@ -17,6 +17,12 @@ const PRE_HORARIOS = window.BUCOR_PRE_HORARIOS || [];
 
 const supa = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
 
+// Segmento del alumno según su actividad: "nino" (clases para niños) o "adulto" (jóvenes y adultos)
+function segmentoAlumno(actividad) {
+  if (typeof actividad !== "string" || !actividad.trim()) return null;
+  return /niñ/i.test(actividad) ? "nino" : "adulto";
+}
+
 /* ---------- estado global ---------- */
 const state = {
   user: null,        // auth user
@@ -479,6 +485,11 @@ async function viewAlumnos(v) {
   const aprob = filasOf.filter((r) => r.aprobado).length;
   const evaluados = filasOf.filter((r) => r.n_obs > 0).length;
 
+  // Segmentos: 10 niños + 10 adultos por coordinador (la mitad de la meta de alumnos)
+  const nNinos = filasOf.filter((r) => segmentoAlumno(r.actividad) === "nino").length;
+  const nAdultos = filasOf.filter((r) => segmentoAlumno(r.actividad) === "adulto").length;
+  const metaSeg = Math.round(metaTot / 2);
+
   // encabezado / filtros
   let filtro = "";
   if (esAdmin) {
@@ -502,6 +513,8 @@ async function viewAlumnos(v) {
     <div class="card">
       <div class="row" style="text-align:center">
         <div class="kpi"><div class="n">${filasOf.length}<span class="small muted">/${metaTot}</span></div><div class="l">Alumnos</div></div>
+        <div class="kpi seg-adulto"><div class="n">${nAdultos}<span class="small muted">/${metaSeg}</span></div><div class="l">Adultos</div></div>
+        <div class="kpi seg-nino"><div class="n">${nNinos}<span class="small muted">/${metaSeg}</span></div><div class="l">Niños</div></div>
         <div class="kpi"><div class="n">${evaluados}</div><div class="l">Con evaluación</div></div>
         <div class="kpi ${aprob >= meta ? "good" : "warn"}"><div class="n">${aprob}<span class="small muted">/${meta}</span></div><div class="l">Aprobados (meta ${meta})</div></div>
       </div>
@@ -525,22 +538,37 @@ async function viewAlumnos(v) {
     render();
   });
 
+  const boxAlumno = (r) => {
+    const pct = r.mejor_pct ?? null;
+    const okBar = r.aprobado ? "ok" : "";
+    const seg = segmentoAlumno(r.actividad);
+    const segClase = seg === "nino" ? "seg-nino" : seg === "adulto" ? "seg-adulto" : "";
+    return `<div class="alumno ${segClase} ${r.aprobado ? "ap" : ""}" data-id="${r.alumno_id}">
+      <div class="ava">${esc(iniciales(r.nombre))}</div>
+      <div class="info">
+        <b>${esc(r.nombre)}</b>
+        <div class="small muted">${esAdmin ? (esSedePrueba(r.sede_id) ? "🧪 " : "") + esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}${r.aprobado ? " " + badgeVerif(vmap[r.alumno_id]) : ""}</div>
+        <div class="bar ${okBar}"><i style="width:${pct ?? 0}%"></i></div>
+      </div>
+      <div class="pct"><div class="n">${pct === null ? "—" : pct + "%"}</div>
+        <div class="small muted">${r.objetivo != null ? "obj " + r.objetivo + "%" : ""}</div></div>
+    </div>`;
+  };
+
   const pintar = (lista) => {
     const cont = $("#lista-alumnos");
     if (!lista.length) { cont.innerHTML = `<div class="card muted">No hay alumnos cargados todavía.</div>`; return; }
-    cont.innerHTML = lista.map((r) => {
-      const pct = r.mejor_pct ?? null;
-      const okBar = r.aprobado ? "ok" : "";
-      return `<div class="alumno ${r.aprobado ? "ap" : ""}" data-id="${r.alumno_id}">
-        <div class="ava">${esc(iniciales(r.nombre))}</div>
-        <div class="info">
-          <b>${esc(r.nombre)}</b>
-          <div class="small muted">${esAdmin ? (esSedePrueba(r.sede_id) ? "🧪 " : "") + esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}${r.aprobado ? " " + badgeVerif(vmap[r.alumno_id]) : ""}</div>
-          <div class="bar ${okBar}"><i style="width:${pct ?? 0}%"></i></div>
-        </div>
-        <div class="pct"><div class="n">${pct === null ? "—" : pct + "%"}</div>
-          <div class="small muted">${r.objetivo != null ? "obj " + r.objetivo + "%" : ""}</div></div>
-      </div>`;
+    // Armamos por segmento: primero adultos, después niños, y al final los que no tienen actividad cargada
+    const grupos = [
+      { seg: "adulto", titulo: "🟦 Adultos", clase: "seg-adulto" },
+      { seg: "nino",   titulo: "🟧 Niños",   clase: "seg-nino"   },
+      { seg: null,     titulo: "Sin actividad asignada", clase: "" },
+    ];
+    cont.innerHTML = grupos.map((g) => {
+      const items = lista.filter((r) => segmentoAlumno(r.actividad) === g.seg);
+      if (!items.length) return "";
+      return `<div class="seg-head ${g.clase}">${g.titulo} <span class="small muted">(${items.length})</span></div>
+        ${items.map(boxAlumno).join("")}`;
     }).join("");
     cont.querySelectorAll(".alumno").forEach((el) =>
       el.addEventListener("click", () => navegar("alumno", { alumnoId: Number(el.dataset.id) })));
@@ -1121,11 +1149,19 @@ async function viewTablero(v) {
   const obsHechas = filas.reduce((n, r) => n + (r.n_obs || 0), 0);
   const pctCumpl = m.grupoAprob ? Math.round((aprob / m.grupoAprob) * 100) : 0;
 
+  // Segmentos: 10 niños + 10 adultos por coordinador (la mitad de la meta)
+  const nNinos = filas.filter((r) => segmentoAlumno(r.actividad) === "nino").length;
+  const nAdultos = filas.filter((r) => segmentoAlumno(r.actividad) === "adulto").length;
+  const metaSegGrupo = Math.round(m.grupoAlumnos / 2);
+  const metaSegSede = Math.round(m.sedeAlumnos / 2);
+
   const porSede = sedesInv.map((s) => {
     const rs = rows.filter((r) => r.sede_id === s.id);
     const coord = profs.find((p) => p.sede_id === s.id);
     return { sede: s, n: rs.length, evaluados: rs.filter((r) => r.n_obs > 0).length,
-             aprob: rs.filter((r) => r.aprobado).length, coord };
+             aprob: rs.filter((r) => r.aprobado).length, coord,
+             adultos: rs.filter((r) => segmentoAlumno(r.actividad) === "adulto").length,
+             ninos: rs.filter((r) => segmentoAlumno(r.actividad) === "nino").length };
   });
 
   const selector = `<label class="field" style="max-width:320px"><span>Trimestre</span>
@@ -1145,6 +1181,8 @@ async function viewTablero(v) {
       <h3>Resumen ${selTrim ? esc(selTrim.nombre) : "general"}</h3>
       <div class="row" style="text-align:center">
         <div class="kpi"><div class="n">${total}<span class="small muted">/${m.grupoAlumnos}</span></div><div class="l">Alumnos en seguimiento</div></div>
+        <div class="kpi seg-adulto"><div class="n">${nAdultos}<span class="small muted">/${metaSegGrupo}</span></div><div class="l">Adultos</div></div>
+        <div class="kpi seg-nino"><div class="n">${nNinos}<span class="small muted">/${metaSegGrupo}</span></div><div class="l">Niños</div></div>
         <div class="kpi"><div class="n">${evaluados}</div><div class="l">Con evaluación</div></div>
         ${obsKpi}
         <div class="kpi ${aprob >= m.grupoAprob ? "good" : "warn"}"><div class="n">${aprob}<span class="small muted">/${m.grupoAprob}</span></div><div class="l">Aprobados (meta ${m.grupoAprob})</div></div>
@@ -1156,12 +1194,14 @@ async function viewTablero(v) {
     <div class="card">
       <h3>Por sede / coordinador</h3>
       <div class="tabla-scroll"><table class="tbl">
-        <thead><tr><th>Sede</th><th>Coordinador</th><th>Alumnos</th><th>Eval.</th><th>Aprob.</th><th>Meta ${m.sedeAprob}</th></tr></thead>
+        <thead><tr><th>Sede</th><th>Coordinador</th><th>Alumnos</th><th>Adultos</th><th>Niños</th><th>Eval.</th><th>Aprob.</th><th>Meta ${m.sedeAprob}</th></tr></thead>
         <tbody>
         ${porSede.map((p) => `<tr>
           <td><b>${esc(p.sede.nombre)}</b></td>
           <td>${esc(p.coord?.nombre || "—")}</td>
           <td>${p.n}/${m.sedeAlumnos}</td>
+          <td>${p.adultos}/${metaSegSede}</td>
+          <td>${p.ninos}/${metaSegSede}</td>
           <td>${p.evaluados}</td>
           <td><b>${p.aprob}</b></td>
           <td>${p.aprob >= m.sedeAprob

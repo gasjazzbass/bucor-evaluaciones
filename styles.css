@@ -200,6 +200,23 @@ input:focus,select:focus,textarea:focus{outline:none; background:#fff; border-co
 .alumno.ap{border-color:var(--verde); background:linear-gradient(90deg,#eafaf0,#fff)}
 .alumno.ap .ava{background:var(--verde-bg); color:var(--verde)}
 
+/* ---------- Segmentos: adultos (azul suave) / niños (naranja suave) ---------- */
+/* Van DESPUÉS de .alumno.ap para que el color del segmento gane sobre el fondo de "aprobado";
+   el borde verde y el badge "✓ Aprobado" siguen marcando la aprobación. */
+.alumno.seg-adulto{background:#eef4fc; box-shadow:inset 4px 0 0 #6aa9e0}
+.alumno.seg-nino{background:#fff4e8; box-shadow:inset 4px 0 0 #e8944a}
+.alumno.ap.seg-adulto{border-color:var(--verde)}
+.alumno.ap.seg-nino{border-color:var(--verde)}
+/* KPIs de segmento */
+.kpi.seg-adulto{background:#eef4fc; border-color:#bcd7f5}
+.kpi.seg-nino{background:#fff4e8; border-color:#f5d9b8}
+/* Encabezado de cada segmento en la lista */
+.seg-head{font-weight:700; font-size:.85rem; margin:14px 0 8px; padding:6px 12px;
+  border-radius:10px; letter-spacing:.3px}
+.seg-head:first-child{margin-top:0}
+.seg-head.seg-adulto{background:#eef4fc; color:#1c4e86}
+.seg-head.seg-nino{background:#fff4e8; color:#a85a12}
+
 /* ---------- Tarjeta que requiere acción (falta subir video) ---------- */
 .card.card-accion{
   border:2px solid var(--amarillo) !important;
