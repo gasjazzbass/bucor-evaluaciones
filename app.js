@@ -49,6 +49,8 @@ const sedesOficiales = () => state.sedes.filter((s) => !s.es_prueba);
 const iniciales = (n) => (n || "?").trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join("").toUpperCase();
 const fmtFecha = (f) => { if (!f) return "—"; const [y, m, d] = f.split("-"); return `${d}/${m}/${y}`; };
 const hoyISO = () => new Date().toISOString().slice(0, 10);
+// ISO local (YYYY-MM-DD) sin corrimiento por zona horaria
+const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const labelAsistencia = (n) => (n == 1 ? "1 vez" : `${n} veces`);
 // arma las <option> de un desplegable a partir de una lista simple
 const opciones = (lista, sel) => lista.map((x) =>
@@ -1544,6 +1546,94 @@ async function viewPreequipoLista(v) {
   $("#btn-nuevo-cand")?.addEventListener("click", () => modalPreAlumno());
 }
 
+/* ---------- Asistencia a entrenamientos (sábados) ---------- */
+const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+// Sábados desde la invitación (o el 1/1 del año en curso, lo que sea posterior) hasta el 31/dic del año en curso
+function sabadosCalendario(fechaInvitacionISO) {
+  const hoy = new Date();
+  const anio = hoy.getFullYear();
+  let inicio = new Date(anio, 0, 1);
+  if (fechaInvitacionISO) {
+    const [y, m, d] = fechaInvitacionISO.split("-").map(Number);
+    const fi = new Date(y, m - 1, d);
+    if (fi > inicio) inicio = fi;
+  }
+  const fin = new Date(anio, 11, 31);
+  const cur = new Date(inicio);
+  cur.setDate(cur.getDate() + ((6 - cur.getDay() + 7) % 7)); // primer sábado >= inicio
+  const out = [];
+  while (cur <= fin) { out.push(new Date(cur)); cur.setDate(cur.getDate() + 7); }
+  return out;
+}
+
+const claseAsis = (e) => e === "p" ? "asis-p" : e === "a" ? "asis-a" : "";
+
+function htmlAsistenciaPre(sabados, mapa) {
+  const hoyISOv = hoyISO();
+  const esPasado = (f) => f <= hoyISOv;   // incluye el sábado de hoy
+  if (!sabados.length) return `<div class="card"><h3 style="margin:0 0 6px">🗓️ Asistencia a entrenamientos (sábados)</h3>
+    <p class="muted small" style="margin:0">Todavía no hay sábados en el calendario de este año.</p></div>`;
+
+  let cuerpo = "", mesActual = -1;
+  sabados.forEach((d) => {
+    if (d.getMonth() !== mesActual) {
+      if (mesActual !== -1) cuerpo += `</div>`;
+      mesActual = d.getMonth();
+      cuerpo += `<div class="asis-mes">${MESES[mesActual]}</div><div class="asis-grid">`;
+    }
+    const f = isoLocal(d);
+    const e = mapa[f];
+    cuerpo += `<button class="asis-pill ${claseAsis(e)} ${esPasado(f) ? "" : "asis-fut"}" data-fecha="${f}">
+      <span class="d">${d.getDate()}</span><span class="ic">${e === "p" ? "✓" : e === "a" ? "✗" : ""}</span></button>`;
+  });
+  cuerpo += `</div>`;
+
+  const transcurridos = sabados.filter((d) => esPasado(isoLocal(d))).length;
+  const asistio = sabados.filter((d) => esPasado(isoLocal(d)) && mapa[isoLocal(d)] === "p").length;
+  const pct = transcurridos ? Math.round((asistio / transcurridos) * 100) : null;
+
+  return `<div class="card">
+    <h3 style="margin:0 0 4px">🗓️ Asistencia a entrenamientos (sábados)</h3>
+    <div class="small" id="asis-contador">Asistió <b>${asistio}</b> de <b>${transcurridos}</b> sábado(s)${pct != null ? ` · <b>${pct}%</b>` : ""}</div>
+    <div class="small muted" style="margin:6px 0 12px">Tocá cada sábado para marcar · 1 toque = presente ✓ · 2 = ausente ✗ · 3 = sin marcar</div>
+    <div id="asis-lista">${cuerpo}</div>
+  </div>`;
+}
+
+function wireAsistenciaPre(id, sabados) {
+  const cont = document.getElementById("asis-lista");
+  if (!cont) return;
+  const hoyISOv = hoyISO();
+  const esPasado = (f) => f <= hoyISOv;
+  const recalcular = () => {
+    const el = document.getElementById("asis-contador");
+    if (!el) return;
+    const transcurridos = sabados.filter((d) => esPasado(isoLocal(d))).length;
+    let asistio = 0;
+    cont.querySelectorAll(".asis-pill.asis-p").forEach((b) => { if (esPasado(b.dataset.fecha)) asistio++; });
+    const pct = transcurridos ? Math.round((asistio / transcurridos) * 100) : null;
+    el.innerHTML = `Asistió <b>${asistio}</b> de <b>${transcurridos}</b> sábado(s)${pct != null ? ` · <b>${pct}%</b>` : ""}`;
+  };
+  cont.querySelectorAll("[data-fecha]").forEach((btn) => btn.addEventListener("click", async () => {
+    const f = btn.dataset.fecha;
+    const actual = btn.classList.contains("asis-p") ? "p" : btn.classList.contains("asis-a") ? "a" : "";
+    let op, next;
+    if (actual === "") { next = "p"; op = supa.from("preequipo_asistencias").upsert({ alumno_id: id, fecha: f, presente: true }); }
+    else if (actual === "p") { next = "a"; op = supa.from("preequipo_asistencias").upsert({ alumno_id: id, fecha: f, presente: false }); }
+    else { next = ""; op = supa.from("preequipo_asistencias").delete().eq("alumno_id", id).eq("fecha", f); }
+    btn.disabled = true;
+    const { error } = await op;
+    btn.disabled = false;
+    if (error) { toast(error.message, "err"); return; }
+    btn.classList.remove("asis-p", "asis-a");
+    if (next) btn.classList.add(next === "p" ? "asis-p" : "asis-a");
+    btn.querySelector(".ic").textContent = next === "p" ? "✓" : next === "a" ? "✗" : "";
+    recalcular();
+  }));
+}
+
 /* ---------- Ficha de un chico del pre-equipo ---------- */
 async function viewPreequipoFicha(v) {
   const id = state.preId;
@@ -1552,6 +1642,17 @@ async function viewPreequipoFicha(v) {
     supa.from("preequipo_observaciones").select("*").eq("alumno_id", id).order("fecha").order("creado"),
   ]);
   if (e1) throw e1; if (e2) throw e2;
+
+  // Asistencia a entrenamientos (sábados): solo mientras está en el pre-equipo
+  let cardAsistencia = "", sabados = [];
+  if (a.estado === "preequipo") {
+    sabados = sabadosCalendario(a.fecha_invitacion);
+    const { data: asis } = await supa.from("preequipo_asistencias").select("fecha, presente").eq("alumno_id", id);
+    const mapa = {};
+    (asis || []).forEach((r) => { mapa[r.fecha] = r.presente ? "p" : "a"; });
+    cardAsistencia = htmlAsistenciaPre(sabados, mapa);
+  }
+
   const et = etapaDeEstado(a.estado);
   const obsEtapa = (obs || []).filter((o) => o.etapa === et);
   const pct = obsEtapa.length ? Math.max(...obsEtapa.map((o) => Number(o.porcentaje))) : null;
@@ -1602,6 +1703,8 @@ async function viewPreequipoFicha(v) {
       ${apto ? `<p class="small" style="color:var(--verde);text-align:center;margin:8px 0 0"><b>${a.estado === "candidato" ? "Apto para invitar al pre-equipo." : "Listo para pasar al equipo oficial."}</b></p>` : ""}` : ""}
     </div>
 
+    ${cardAsistencia}
+
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <h3 style="margin:0;flex:1">${et === "candidato" ? "Evaluación de candidato" : "Seguimiento"} (${obsEtapa.length})</h3>
@@ -1616,6 +1719,8 @@ async function viewPreequipoFicha(v) {
       <button class="btn ghost sm" id="btn-pre-editar">✏️ Editar datos</button>
       <button class="btn danger sm" id="btn-pre-eliminar">🗑 Eliminar</button>
     </div>`;
+
+  if (a.estado === "preequipo") wireAsistenciaPre(id, sabados);
 
   $("#pre-volver").addEventListener("click", () => navegar(state.profile.rol === "admin" ? "pre-supervision" : (a.estado === "candidato" ? "pre-candidatos" : "pre-seguimiento")));
   $("#btn-pre-nueva")?.addEventListener("click", () => navegar("pre-nueva-obs", { preId: id }));
