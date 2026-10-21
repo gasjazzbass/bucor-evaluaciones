@@ -420,6 +420,7 @@ function navegar(route, extra = {}) {
   state.route = route;
   if (extra.alumnoId !== undefined) state.alumnoId = extra.alumnoId;
   if (extra.preId !== undefined) state.preId = extra.preId;
+  state.obsEditId = extra.obsId ?? null;      // observación a editar (null = alta nueva)
   state.scrollTo = extra.scrollTo || null;   // ancla a la que saltar tras renderizar (deep-link)
   // Cada solapa del pre-equipo fija su filtro de estado
   if (route === "pre-candidatos") state.preFiltro = "candidato";
@@ -690,6 +691,7 @@ async function viewFichaAlumno(v) {
       <td><b>${o.porcentaje}%</b> ${objOk ? "✓" : ""}</td>
       <td class="no-print" style="white-space:nowrap">
         <button class="btn ghost sm" data-ver="${o.id}">Ver</button>
+        ${gestor ? `<button class="btn ghost sm" data-edit-obs="${o.id}" title="Editar observación">Editar</button>` : ""}
         ${gestor ? `<button class="btn ghost sm" data-del-obs="${o.id}" title="Eliminar observación" style="color:var(--rojo)">🗑</button>` : ""}
       </td>
     </tr>`;
@@ -758,6 +760,8 @@ async function viewFichaAlumno(v) {
   }
   v.querySelectorAll("[data-ver]").forEach((b) =>
     b.addEventListener("click", () => modalVerObs(obs.find((o) => o.id == b.dataset.ver))));
+  v.querySelectorAll("[data-edit-obs]").forEach((b) =>
+    b.addEventListener("click", () => navegar("nueva-obs", { alumnoId: id, obsId: Number(b.dataset.editObs) })));
   v.querySelectorAll("[data-del-obs]").forEach((b) =>
     b.addEventListener("click", () => {
       const o = obs.find((x) => x.id == b.dataset.delObs);
@@ -1033,44 +1037,55 @@ function modalVerObs(o) {
    ============================================================ */
 async function viewNuevaObs(v) {
   const id = state.alumnoId;
+  const editId = state.obsEditId || null;
   const [{ data: alumno, error }, { data: prev }] = await Promise.all([
     supa.from("alumnos").select("*").eq("id", id).single(),
     supa.from("observaciones").select("items,fecha,instructor,dia,horario").eq("alumno_id", id)
       .order("fecha", { ascending: false }).order("creado", { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (error) throw error;
-  // "Memoria": precargamos las calificaciones de la última observación (el alumno no desaprende)
-  const marks = prev?.items ? { ...prev.items } : {};
-  const precargado = !!prev?.items;
+
+  // Modo edición: traemos la observación a editar
+  let editObs = null;
+  if (editId) {
+    const { data } = await supa.from("observaciones").select("*").eq("id", editId).maybeSingle();
+    editObs = data || null;
+  }
+  const fuente = editObs || prev;   // de dónde precargamos los ítems y la info de clase
+  const marks = fuente?.items ? { ...fuente.items } : {};
+  // El cartel de "memoria" solo tiene sentido en un alta nueva precargada
+  const precargado = !editId && !!prev?.items;
 
   v.innerHTML = `
     <button class="btn ghost sm no-print" id="btn-cancelar" style="margin-bottom:12px">← Cancelar</button>
     <div class="card">
-      <h3 style="margin:0">Nueva observación</h3>
+      <h3 style="margin:0">${editId ? "Editar observación" : "Nueva observación"}</h3>
       <div class="small muted">${esc(alumno.nombre)} · ${esc(sedeNombre(alumno.sede_id))}</div>
       <div class="row" style="margin-top:12px">
         <label class="field"><span>Fecha de la observación</span>
-          <input type="date" id="obs-fecha" value="${hoyISO()}" max="${hoyISO()}"></label>
+          <input type="date" id="obs-fecha" value="${editObs?.fecha || hoyISO()}" max="${hoyISO()}"></label>
         <label class="field"><span>Día</span>
-          <select id="obs-dia"><option value="">— Elegir —</option>${opciones(DIAS, prev?.dia)}</select></label>
+          <select id="obs-dia"><option value="">— Elegir —</option>${opciones(DIAS, fuente?.dia)}</select></label>
         <label class="field"><span>Horario</span>
-          <select id="obs-horario"><option value="">— Elegir —</option>${opciones(HORARIOS, prev?.horario)}</select></label>
+          <select id="obs-horario"><option value="">— Elegir —</option>${opciones(HORARIOS, fuente?.horario)}</select></label>
       </div>
       <label class="field"><span>Instructor/es</span>
-        <input id="obs-instructor" value="${esc(prev?.instructor || "")}" placeholder="Nombre del instructor a cargo"></label>
-      ${precargado
+        <input id="obs-instructor" value="${esc(fuente?.instructor || "")}" placeholder="Nombre del instructor a cargo"></label>
+      ${editId
+        ? `<p class="small" style="background:#fff4e8;color:#a85a12;padding:10px 12px;border-radius:10px">✏️ <b>Estás editando una observación ya cargada.</b> Modificá lo que necesites y guardá. El cambio queda registrado y se avisa por notificación.</p>`
+        : precargado
         ? `<p class="small" style="background:var(--celeste);color:var(--oxford);padding:10px 12px;border-radius:10px">🧠 <b>Precargado</b> con la observación anterior. Subí solo los ítems que mejoraron (de NL→PL, PL→L). Revisá y guardá.</p>`
         : `<p class="small muted">Tocá <b>NL</b> (no logrado), <b>PL</b> (parcial) o <b>L</b> (logrado) en cada ítem. Se califican los 19.</p>`}
       <div id="rubrica"></div>
       <label class="field" style="margin-top:14px"><span>Notas (opcional)</span>
-        <textarea id="obs-notas" placeholder="Comentarios o aclaraciones sobre esta observación…"></textarea></label>
+        <textarea id="obs-notas" placeholder="Comentarios o aclaraciones sobre esta observación…">${esc(editObs?.notas || "")}</textarea></label>
     </div>
     <div class="eval-bar">
       <div class="res">
         <div class="small muted"><span id="res-cargados">0</span>/${TOTAL_ITEMS} ítems · NL <b id="r-nl">0</b> · PL <b id="r-pl">0</b> · L <b id="r-l">0</b></div>
         <div class="n"><span id="res-pct">0</span>% <span class="small muted">(total <span id="res-suma">0</span>)</span></div>
       </div>
-      <button class="btn primary" id="btn-guardar-obs" disabled>Guardar</button>
+      <button class="btn primary" id="btn-guardar-obs" disabled>${editId ? "Guardar cambios" : "Guardar"}</button>
     </div>`;
 
   const cont = $("#rubrica");
@@ -1112,16 +1127,26 @@ async function viewNuevaObs(v) {
     const r = resumenMarcas(marks);
     if (!r.completo) { toast("Faltan ítems por calificar", "err"); return; }
     const btn = $("#btn-guardar-obs"); btn.disabled = true; btn.textContent = "Guardando…";
-    const { error } = await supa.from("observaciones").insert({
-      alumno_id: id, fecha: $("#obs-fecha").value || hoyISO(),
-      items: marks, creado_por: state.profile.id,
+    const datos = {
+      fecha: $("#obs-fecha").value || hoyISO(),
+      items: marks,
       notas: $("#obs-notas").value.trim() || null,
       dia: $("#obs-dia").value || null,
       horario: $("#obs-horario").value || null,
       instructor: $("#obs-instructor").value.trim() || null,
-    });
-    if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = "Guardar"; return; }
-    toast(`Observación guardada: ${r.pct}%`, "ok");
+    };
+    let error;
+    if (editId) {
+      datos.editado_por = state.profile.id;
+      datos.editado_en = new Date().toISOString();
+      ({ error } = await supa.from("observaciones").update(datos).eq("id", editId));
+    } else {
+      datos.alumno_id = id;
+      datos.creado_por = state.profile.id;
+      ({ error } = await supa.from("observaciones").insert(datos));
+    }
+    if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = editId ? "Guardar cambios" : "Guardar"; return; }
+    toast(editId ? `Observación actualizada: ${r.pct}%` : `Observación guardada: ${r.pct}%`, "ok");
     navegar("alumno", { alumnoId: id });
   });
 }
