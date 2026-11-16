@@ -230,13 +230,16 @@ function mostrarApp() {
   construirTabs();
   const inicio = state.profile.rol === "admin" ? "tablero"
     : state.profile.rol === "preequipo" ? "pre-candidatos" : "alumnos";
-  navegar(inicio);
+  // Si se entró tocando un push, vamos directo a lo que avisa (ej. el chat del alumno)
+  const desdePush = notifPendiente; notifPendiente = null;
+  if (desdePush) abrirNotificacion(desdePush, inicio);
+  else navegar(inicio);
   // Notificaciones: genera recordatorios pendientes, carga inicial + refresco cada 60s
   revisarRecordatorios();
   clearInterval(notifTimer);
   notifTimer = setInterval(cargarNotificaciones, 60000);
-  // Saludo de bienvenida (solo una vez por ingreso)
-  mostrarBienvenida();
+  // Saludo de bienvenida (solo una vez por ingreso; no tapa lo que abrió el push)
+  if (!desdePush) mostrarBienvenida();
   // Notificaciones push al panel del celular (pide permiso la 1ª vez)
   activarPush();
 }
@@ -320,20 +323,40 @@ function modalNotificaciones() {
     <div class="modal-actions"><button class="btn primary" id="notif-cerrar">Cerrar</button></div>`);
   $("#notif-cerrar").addEventListener("click", cerrarModal);
   $("#notif-todas")?.addEventListener("click", async () => { await marcarLeidas(); cerrarModal(); });
-  $("#notif-lista").querySelectorAll(".notif-item").forEach((el) => el.addEventListener("click", async () => {
-    const nid = Number(el.dataset.id);
-    await marcarUnaLeida(nid);
-    const alumnoId = el.dataset.alumno ? Number(el.dataset.alumno) : null;
-    const preId = el.dataset.pre ? Number(el.dataset.pre) : null;
-    const tipo = state.notifs.find((x) => x.id === nid)?.tipo;
-    // Mensajes (y avisos viejos de comentario/rechazo) llevan directo al chat
-    const alChat = ["mensaje", "video_comentario", "video_inicial_comentario",
-      "video_rechazado", "video_inicial_rechazado"].includes(tipo);
-    const scrollTo = alChat ? "chat-box" : null;
+  $("#notif-lista").querySelectorAll(".notif-item").forEach((el) => el.addEventListener("click", () => {
     cerrarModal();
-    if (alumnoId) navegar("alumno", { alumnoId, scrollTo });
-    else if (preId) navegar("pre-alumno", { preId, scrollTo });
+    abrirNotificacion(Number(el.dataset.id));
   }));
+}
+
+// Abre el destino de una notificación (desde la campanita o tocando el push del celular):
+// la marca leída y lleva a la ficha del alumno; si es un mensaje, directo al chat.
+// "siNoHay" = solapa a mostrar si la notificación no lleva a ningún lado.
+async function abrirNotificacion(nid, siNoHay = null) {
+  let n = state.notifs.find((x) => x.id === nid);
+  if (!n) {
+    const { data } = await supa.from("notificaciones").select("*").eq("id", nid).maybeSingle();
+    n = data || null;
+  }
+  if (n) await marcarUnaLeida(nid);
+  // Mensajes (y avisos viejos de comentario/rechazo) llevan directo al chat
+  const alChat = ["mensaje", "video_comentario", "video_inicial_comentario",
+    "video_rechazado", "video_inicial_rechazado"].includes(n?.tipo);
+  const scrollTo = alChat ? "chat-box" : null;
+  if (n?.alumno_id) navegar("alumno", { alumnoId: Number(n.alumno_id), scrollTo });
+  else if (n?.pre_alumno_id) navegar("pre-alumno", { preId: Number(n.pre_alumno_id), scrollTo });
+  else if (siNoHay) navegar(siNoHay);
+}
+
+// Si la app se abrió tocando un push, el link trae ?notif=<id>. Lo guardamos y lo limpiamos de la barra.
+let notifPendiente = Number(new URLSearchParams(location.search).get("notif")) || null;
+if (notifPendiente) history.replaceState(null, "", location.pathname);
+
+// Si la app ya estaba abierta, el service worker nos avisa qué push se tocó
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.tipo === "abrir-notif" && state.profile) abrirNotificacion(Number(e.data.id));
+  });
 }
 
 async function marcarLeidas() {

@@ -34,18 +34,24 @@ self.addEventListener("push", (e) => {
     badge: "img/icon-192.png",
     tag: d.tag || undefined,          // agrupa avisos del mismo alumno
     renotify: !!d.tag,
-    data: { url: d.url || APP_URL },
+    data: { url: d.url || APP_URL, notif: d.notif || null },
   };
   e.waitUntil(self.registration.showNotification(title, options));
 });
 
+// Al tocar el aviso: si la app ya está abierta, la trae al frente y le dice qué aviso se tocó
+// (ella navega directo, ej. al chat del alumno). Si no está abierta, la abre con ?notif=<id>.
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || APP_URL;
+  const data = e.notification.data || {};
+  const url = data.url || APP_URL;
   e.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
       for (const w of wins) {
-        if (w.url.startsWith(APP_URL) && "focus" in w) return w.focus();
+        if (w.url.startsWith(APP_URL) && "focus" in w) {
+          if (data.notif) w.postMessage({ tipo: "abrir-notif", id: data.notif });
+          return w.focus();
+        }
       }
       return self.clients.openWindow(url);
     })
