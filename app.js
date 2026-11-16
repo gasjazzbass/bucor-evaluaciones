@@ -307,7 +307,7 @@ function fmtCuando(ts) {
 function modalNotificaciones() {
   const items = state.notifs;
   const lista = items.length ? items.map((x) => `
-    <div class="notif-item ${x.leida ? "" : "no-leida"}" data-id="${x.id}" ${x.alumno_id ? `data-alumno="${x.alumno_id}"` : ""}>
+    <div class="notif-item ${x.leida ? "" : "no-leida"}" data-id="${x.id}" ${x.alumno_id ? `data-alumno="${x.alumno_id}"` : ""} ${x.pre_alumno_id ? `data-pre="${x.pre_alumno_id}"` : ""}>
       <div class="notif-msg">${esc(x.mensaje)}</div>
       <div class="small muted">${fmtCuando(x.creada)}</div>
     </div>`).join("") : `<p class="muted">No tenés notificaciones.</p>`;
@@ -324,11 +324,15 @@ function modalNotificaciones() {
     const nid = Number(el.dataset.id);
     await marcarUnaLeida(nid);
     const alumnoId = el.dataset.alumno ? Number(el.dataset.alumno) : null;
+    const preId = el.dataset.pre ? Number(el.dataset.pre) : null;
     const tipo = state.notifs.find((x) => x.id === nid)?.tipo;
-    const scrollTo = tipo === "video_comentario" ? "coment-cierre"
-      : tipo === "video_inicial_comentario" ? "coment-inicial" : null;
+    // Mensajes (y avisos viejos de comentario/rechazo) llevan directo al chat
+    const alChat = ["mensaje", "video_comentario", "video_inicial_comentario",
+      "video_rechazado", "video_inicial_rechazado"].includes(tipo);
+    const scrollTo = alChat ? "chat-box" : null;
     cerrarModal();
     if (alumnoId) navegar("alumno", { alumnoId, scrollTo });
+    else if (preId) navegar("pre-alumno", { preId, scrollTo });
   }));
 }
 
@@ -476,7 +480,7 @@ async function viewAlumnos(v) {
 
   let q = supa.from("alumno_estado").select("*").eq("activo", true).order("nombre");
   if (selTrim) q = q.eq("trimestre_id", selTrim.id);
-  const { data: rows, error } = await q;
+  const [{ data: rows, error }] = await Promise.all([q, cargarNotificaciones()]);   // avisos al día para el globito 💬
   if (error) throw error;
 
   // estado de verificación por alumno (para el indicador de la lista)
@@ -549,7 +553,7 @@ async function viewAlumnos(v) {
     return `<div class="alumno ${segClase} ${r.aprobado ? "ap" : ""}" data-id="${r.alumno_id}">
       <div class="ava">${esc(iniciales(r.nombre))}</div>
       <div class="info">
-        <b>${esc(r.nombre)}</b>
+        <b>${esc(r.nombre)}</b> ${globoMsj(noLeidosMsj("alumno_id", r.alumno_id))}
         <div class="small muted">${esAdmin ? (esSedePrueba(r.sede_id) ? "🧪 " : "") + esc(sedeNombre(r.sede_id)) + " · " : ""}${r.n_obs} obs. · ${badgeEstado(r)}${r.aprobado ? " " + badgeVerif(vmap[r.alumno_id]) : ""}</div>
         <div class="bar ${okBar}"><i style="width:${pct ?? 0}%"></i></div>
       </div>
@@ -736,6 +740,8 @@ async function viewFichaAlumno(v) {
         : `<p class="muted">Todavía no hay observaciones. ${esCoord ? "Cargá la primera para fijar la línea de base." : ""}</p>`}
     </div>
 
+    <div id="chat-cont"></div>
+
     <div class="row no-print">
       <button class="btn ghost" id="btn-pdf">🖨️ Exportar PDF</button>
       ${gestor ? `<button class="btn ghost" id="btn-editar-al">✏️ Editar datos</button>` : ""}
@@ -781,18 +787,10 @@ async function viewFichaAlumno(v) {
   if (est.aprobado) wireVerificacion(id, verif, esCoord);
   if (obs.length >= 1) wireVideoInicial(id, vi, esCoord);
 
-  // Deep-link: si vengo de una notificación de comentario, salto y resalto el comentario
-  if (state.scrollTo) {
-    const destino = state.scrollTo; state.scrollTo = null;
-    requestAnimationFrame(() => {
-      const elc = document.getElementById(destino);
-      if (elc) {
-        elc.scrollIntoView({ behavior: "smooth", block: "center" });
-        elc.classList.add("flash");
-        setTimeout(() => elc.classList.remove("flash"), 2600);
-      }
-    });
-  }
+  // Chat con el coordinador / admin, y deep-link si vengo de una notificación
+  await montarChat($("#chat-cont"), { alumnoId: id });
+  wireIrAlChat(v);
+  saltarAncla();
 }
 
 /* ---------- verificación: HTML + eventos ---------- */
@@ -810,8 +808,7 @@ function htmlVerificacion({ verif, esCoord, url1, url2 }) {
   if (esCoord) {
     cuerpo = estado === "verificado"
       ? `<p class="small muted">✔ El administrador verificó los videos. ¡Trámite completo!</p>`
-      : `${verif?.comentario_admin ? `<div class="coment-admin" id="coment-cierre">💬 <b>Comentario del administrador:</b> ${esc(verif.comentario_admin)}</div>` : ""}
-         ${estado === "rechazado" && verif?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(verif.comentario)}</b></p>` : ""}
+      : `${estado === "rechazado" ? `<p class="small" style="color:var(--rojo)">❌ <b>El administrador rechazó los videos.</b> <a href="#" class="ir-chat">Mirá el motivo en Mensajes ↓</a></p>` : ""}
          <p class="small muted">El alumno alcanzó el objetivo. Subí <b>2 videos cortos</b> (máx. 50 MB c/u) donde se lo vea nadando, para que el administrador verifique.</p>
          <label class="field"><span>Video 1</span><input type="file" id="vid1" accept="video/*"></label>
          <label class="field"><span>Video 2</span><input type="file" id="vid2" accept="video/*"></label>
@@ -821,14 +818,10 @@ function htmlVerificacion({ verif, esCoord, url1, url2 }) {
       ? `<p class="muted">El coordinador todavía no subió los videos.</p>`
       : estado === "verificado"
         ? `<p class="small" style="color:var(--verde)"><b>✔ Verificado.</b> Trámite completo.</p>`
-        : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="verif-coment">${esc(verif.comentario || "")}</textarea></label>
+        : `<p class="small muted" style="margin:10px 0 8px">El motivo o mensaje que dejes queda registrado en <b>Mensajes</b>, más abajo.</p>
            <div class="row no-print">
              <button class="btn primary" id="btn-verificar">✔ Verificar</button>
              <button class="btn danger" id="btn-rechazar">✖ Rechazar</button>
-           </div>
-           <div class="coment-envio no-print">
-             <label class="field"><span>💬 Comentario para el coordinador</span><textarea id="verif-coment-admin" placeholder="Escribí un comentario y avisale al coordinador…">${esc(verif.comentario_admin || "")}</textarea></label>
-             <button class="btn agua sm" id="btn-coment-verif">Enviar comentario al coordinador</button>
            </div>`;
   }
 
@@ -873,27 +866,10 @@ function wireVerificacion(id, verif, esCoord) {
       }
     });
   } else {
-    const revisar = async (estado) => {
-      const comentario = $("#verif-coment")?.value.trim() || null;
-      if (estado === "rechazado" && !comentario) { toast("Escribí un motivo para el rechazo", "err"); return; }
-      const { error } = await supa.from("verificaciones").update({
-        estado, comentario, revisado_por: state.profile.id, revisado_en: new Date().toISOString(),
-      }).eq("alumno_id", id);
-      if (error) { toast(error.message, "err"); return; }
-      toast(estado === "verificado" ? "Verificación aprobada ✔" : "Videos rechazados", "ok"); render();
-    };
-    $("#btn-verificar")?.addEventListener("click", () => revisar("verificado"));
-    $("#btn-rechazar")?.addEventListener("click", () => revisar("rechazado"));
-    $("#btn-coment-verif")?.addEventListener("click", async () => {
-      const txt = $("#verif-coment-admin").value.trim();
-      if (!txt) { toast("Escribí un comentario", "err"); return; }
-      const btn = $("#btn-coment-verif"); btn.disabled = true; btn.textContent = "Enviando…";
-      const { error } = await supa.from("verificaciones").update({
-        comentario_admin: txt, comentario_admin_en: new Date().toISOString(),
-      }).eq("alumno_id", id);
-      if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = "Enviar comentario al coordinador"; return; }
-      toast("Comentario enviado al coordinador ✔", "ok"); render();
-    });
+    $("#btn-verificar")?.addEventListener("click", () =>
+      modalRevisionVideo({ tabla: "verificaciones", alumnoId: id, estado: "verificado", tipo: "cierre" }));
+    $("#btn-rechazar")?.addEventListener("click", () =>
+      modalRevisionVideo({ tabla: "verificaciones", alumnoId: id, estado: "rechazado", tipo: "cierre" }));
   }
   // Eliminar videos (coordinador y admin)
   $("#btn-eliminar-videos")?.addEventListener("click", () => confirmar(
@@ -920,8 +896,7 @@ function htmlVideoInicial({ vi, esCoord, url }) {
   if (esCoord) {
     cuerpo = estado === "verificado"
       ? `<p class="small muted">✔ El administrador verificó el video inicial. ¡Registro listo!</p>`
-      : `${vi?.comentario_admin ? `<div class="coment-admin" id="coment-inicial">💬 <b>Comentario del administrador:</b> ${esc(vi.comentario_admin)}</div>` : ""}
-         ${estado === "rechazado" && vi?.comentario ? `<p class="small">Motivo del rechazo: <b>${esc(vi.comentario)}</b></p>` : ""}
+      : `${estado === "rechazado" ? `<p class="small" style="color:var(--rojo)">❌ <b>El administrador rechazó el video inicial.</b> <a href="#" class="ir-chat">Mirá el motivo en Mensajes ↓</a></p>` : ""}
          <p class="small muted">Registrá el <b>punto de partida</b> del alumno: subí <b>1 video corto</b> (máx. 50 MB) donde se vea su nivel inicial, para contrastarlo al lograr el objetivo.</p>
          <label class="field"><span>Video inicial</span><input type="file" id="vi-file" accept="video/*"></label>
          <button class="btn primary no-print" id="btn-subir-inicial">${vi ? "Reemplazar video" : "Subir video"}</button>`;
@@ -930,14 +905,10 @@ function htmlVideoInicial({ vi, esCoord, url }) {
       ? `<p class="muted">El coordinador todavía no subió el video inicial.</p>`
       : estado === "verificado"
         ? `<p class="small" style="color:var(--verde)"><b>✔ Verificado.</b> Registro listo.</p>`
-        : `<label class="field"><span>Comentario (se muestra al coordinador si rechazás)</span><textarea id="vi-coment">${esc(vi.comentario || "")}</textarea></label>
+        : `<p class="small muted" style="margin:10px 0 8px">El motivo o mensaje que dejes queda registrado en <b>Mensajes</b>, más abajo.</p>
            <div class="row no-print">
              <button class="btn primary" id="btn-vi-verificar">✔ Verificar</button>
              <button class="btn danger" id="btn-vi-rechazar">✖ Rechazar</button>
-           </div>
-           <div class="coment-envio no-print">
-             <label class="field"><span>💬 Comentario para el coordinador</span><textarea id="vi-coment-admin" placeholder="Escribí un comentario y avisale al coordinador…">${esc(vi.comentario_admin || "")}</textarea></label>
-             <button class="btn agua sm" id="btn-coment-vi">Enviar comentario al coordinador</button>
            </div>`;
   }
 
@@ -978,27 +949,10 @@ function wireVideoInicial(id, vi, esCoord) {
       }
     });
   } else {
-    const revisar = async (estado) => {
-      const comentario = $("#vi-coment")?.value.trim() || null;
-      if (estado === "rechazado" && !comentario) { toast("Escribí un motivo para el rechazo", "err"); return; }
-      const { error } = await supa.from("video_inicial").update({
-        estado, comentario, revisado_por: state.profile.id, revisado_en: new Date().toISOString(),
-      }).eq("alumno_id", id);
-      if (error) { toast(error.message, "err"); return; }
-      toast(estado === "verificado" ? "Video inicial verificado ✔" : "Video inicial rechazado", "ok"); render();
-    };
-    $("#btn-vi-verificar")?.addEventListener("click", () => revisar("verificado"));
-    $("#btn-vi-rechazar")?.addEventListener("click", () => revisar("rechazado"));
-    $("#btn-coment-vi")?.addEventListener("click", async () => {
-      const txt = $("#vi-coment-admin").value.trim();
-      if (!txt) { toast("Escribí un comentario", "err"); return; }
-      const btn = $("#btn-coment-vi"); btn.disabled = true; btn.textContent = "Enviando…";
-      const { error } = await supa.from("video_inicial").update({
-        comentario_admin: txt, comentario_admin_en: new Date().toISOString(),
-      }).eq("alumno_id", id);
-      if (error) { toast(error.message, "err"); btn.disabled = false; btn.textContent = "Enviar comentario al coordinador"; return; }
-      toast("Comentario enviado al coordinador ✔", "ok"); render();
-    });
+    $("#btn-vi-verificar")?.addEventListener("click", () =>
+      modalRevisionVideo({ tabla: "video_inicial", alumnoId: id, estado: "verificado", tipo: "inicial" }));
+    $("#btn-vi-rechazar")?.addEventListener("click", () =>
+      modalRevisionVideo({ tabla: "video_inicial", alumnoId: id, estado: "rechazado", tipo: "inicial" }));
   }
   // Eliminar video inicial (coordinador y admin)
   $("#btn-eliminar-inicial")?.addEventListener("click", () => confirmar(
@@ -1010,6 +964,150 @@ function wireVideoInicial(id, vi, esCoord) {
       if (error) { toast(error.message, "err"); return; }
       cerrarModal(); toast("Video eliminado", "ok"); render();
     }));
+}
+
+/* ---------- ventanita para verificar (mensaje opcional) o rechazar (motivo obligatorio) ----------
+   Cambia el estado del video y deja asentado el mensaje en el chat del alumno
+   (el aviso al coordinador sale de ese mensaje). */
+function modalRevisionVideo({ tabla, alumnoId, estado, tipo }) {
+  const rechaza = estado === "rechazado";
+  const que = tipo === "inicial" ? "el video inicial" : "los videos de cierre";
+  abrirModal(`
+    <h3>${rechaza ? "✖ Rechazar" : "✔ Verificar"} ${que}</h3>
+    <label class="field"><span>${rechaza ? "Motivo del rechazo *" : "Mensaje para el coordinador (opcional)"}</span>
+      <textarea id="rev-texto" placeholder="${rechaza ? "Contale qué hay que corregir…" : "Ej: ¡Muy buen trabajo!"}"></textarea></label>
+    <p class="small muted" style="margin:0">Queda registrado en <b>Mensajes</b> y se le avisa al coordinador.</p>
+    <div class="modal-actions">
+      <button class="btn ghost" id="rev-cancel">Cancelar</button>
+      <button class="btn ${rechaza ? "danger" : "primary"}" id="rev-ok">${rechaza ? "Rechazar" : "Verificar"}</button>
+    </div>`);
+  $("#rev-cancel").addEventListener("click", cerrarModal);
+  $("#rev-ok").addEventListener("click", async () => {
+    const texto = $("#rev-texto").value.trim();
+    if (rechaza && !texto) { toast("Escribí el motivo del rechazo", "err"); return; }
+    const btn = $("#rev-ok"); btn.disabled = true;
+    const { error } = await supa.from(tabla).update({
+      estado, comentario: texto || null, revisado_por: state.profile.id, revisado_en: new Date().toISOString(),
+    }).eq("alumno_id", alumnoId);
+    if (error) { toast(error.message, "err"); btn.disabled = false; return; }
+    const { error: e2 } = await supa.from("mensajes").insert({
+      alumno_id: alumnoId, autor_id: state.profile.id, texto,
+      etiqueta: (rechaza ? "rechazo_" : "verif_") + (tipo === "inicial" ? "inicial" : "cierre"),
+    });
+    cerrarModal();
+    if (e2) toast("Se guardó la revisión, pero no el mensaje: " + e2.message, "err");
+    else toast(rechaza ? "Rechazo enviado al coordinador" : "Verificación aprobada ✔", "ok");
+    render();
+  });
+}
+
+/* ============================================================
+   MENSAJES · chat admin ↔ coordinador en la ficha de cada alumno
+   (sedes) y de cada chico del pre-equipo
+   ============================================================ */
+const ETIQUETAS_MSJ = {
+  rechazo_cierre:  "❌ Rechazo · Videos de cierre",
+  rechazo_inicial: "❌ Rechazo · Video inicial",
+  verif_cierre:    "✅ Verificado · Videos de cierre",
+  verif_inicial:   "✅ Verificado · Video inicial",
+  hist_cierre:     "📹 Comentario · Videos de cierre",
+  hist_inicial:    "🎬 Comentario · Video inicial",
+};
+
+// Mensajes sin leer de un alumno (sale de las notificaciones del usuario)
+const noLeidosMsj = (campo, id) =>
+  state.notifs.filter((n) => !n.leida && n.tipo === "mensaje" && Number(n[campo]) === Number(id)).length;
+const globoMsj = (n) => n ? `<span class="globo-msj" title="${n} mensaje(s) sin leer">💬 ${n}</span>` : "";
+
+async function montarChat(cont, { alumnoId = null, preId = null }) {
+  if (!cont) return;
+  const campo = alumnoId ? "alumno_id" : "pre_alumno_id";
+  const valor = alumnoId || preId;
+  const esAdmin = state.profile.rol === "admin";
+
+  const pintar = async () => {
+    const { data, error } = await supa.from("mensajes").select("*").eq(campo, valor).order("creado");
+    if (error) {
+      cont.innerHTML = `<div class="card" id="chat-box"><h3 style="margin:0 0 4px">💬 Mensajes</h3>
+        <p class="small muted" style="margin:0">No se pudieron cargar los mensajes: ${esc(error.message)}</p></div>`;
+      return;
+    }
+    const msjs = data || [];
+    const burbujas = msjs.length ? msjs.map((m) => {
+      const mio = m.autor_id === state.profile.id;
+      const tipo = (m.etiqueta || "").split("_")[0];   // rechazo | verif | hist
+      return `<div class="msj ${mio ? "mio" : ""}">
+        <div class="msj-burbuja">
+          ${ETIQUETAS_MSJ[m.etiqueta] ? `<div class="msj-etiqueta ${tipo}">${ETIQUETAS_MSJ[m.etiqueta]}</div>` : ""}
+          ${m.texto ? `<div class="msj-texto">${esc(m.texto)}</div>` : ""}
+        </div>
+        <div class="msj-meta">${esc(mio ? "Vos" : (m.autor_nombre || ""))}${!mio && m.autor_rol === "admin" ? " · Admin" : ""} · ${fmtCuando(m.creado)}
+          ${(mio || esAdmin) ? `<button class="msj-borrar no-print" data-borrar-msj="${m.id}" title="Borrar mensaje">🗑</button>` : ""}</div>
+      </div>`;
+    }).join("") : `<p class="small muted" style="margin:0">Todavía no hay mensajes. Escribí el primero para acompañar el seguimiento.</p>`;
+
+    cont.innerHTML = `<div class="card" id="chat-box">
+      <h3 style="margin:0 0 4px">💬 Mensajes</h3>
+      <p class="small muted" style="margin:0 0 10px">${esAdmin ? "Conversación con el coordinador a cargo." : "Conversación con el administrador."} Cada mensaje nuevo le llega como notificación a la otra parte.</p>
+      <div class="chat-lista">${burbujas}</div>
+      <div class="chat-escribir no-print">
+        <textarea id="chat-texto" rows="2" placeholder="Escribí un mensaje…"></textarea>
+        <button class="btn primary" id="chat-enviar">Enviar</button>
+      </div>
+    </div>`;
+    const lista = cont.querySelector(".chat-lista");
+    lista.scrollTop = lista.scrollHeight;   // muestra lo más reciente
+
+    const enviar = async () => {
+      const texto = $("#chat-texto").value.trim();
+      if (!texto) return;
+      const btn = $("#chat-enviar"); btn.disabled = true; btn.textContent = "Enviando…";
+      const { error: e } = await supa.from("mensajes").insert({ [campo]: valor, autor_id: state.profile.id, texto });
+      if (e) { toast(e.message, "err"); btn.disabled = false; btn.textContent = "Enviar"; return; }
+      await pintar();
+    };
+    $("#chat-enviar").addEventListener("click", enviar);
+    $("#chat-texto").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); enviar(); }
+    });
+    cont.querySelectorAll("[data-borrar-msj]").forEach((b) => b.addEventListener("click", () => confirmar(
+      "¿Borrar este mensaje?", "Se elimina del historial. No se puede deshacer.",
+      async () => {
+        const { error: e } = await supa.from("mensajes").delete().eq("id", b.dataset.borrarMsj);
+        if (e) { toast(e.message, "err"); return; }
+        cerrarModal(); toast("Mensaje borrado", "ok"); await pintar();
+      })));
+  };
+
+  await pintar();
+
+  // Al abrir el chat, los avisos de mensajes de este alumno quedan leídos
+  const pendientes = state.notifs.filter((n) => !n.leida && n.tipo === "mensaje" && Number(n[campo]) === Number(valor));
+  if (pendientes.length) {
+    await supa.from("notificaciones").update({ leida: true }).in("id", pendientes.map((n) => n.id));
+    pendientes.forEach((n) => (n.leida = true));
+    pintarCampana();
+  }
+}
+
+// Enlaces "Mirá el motivo en Mensajes ↓" y deep-link desde una notificación
+function wireIrAlChat(v) {
+  v.querySelectorAll(".ir-chat").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    $("#chat-box")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+}
+function saltarAncla() {
+  if (!state.scrollTo) return;
+  const destino = state.scrollTo; state.scrollTo = null;
+  requestAnimationFrame(() => {
+    const elc = document.getElementById(destino);
+    if (elc) {
+      elc.scrollIntoView({ behavior: "smooth", block: "center" });
+      elc.classList.add("flash");
+      setTimeout(() => elc.classList.remove("flash"), 2600);
+    }
+  });
 }
 
 function modalVerObs(o) {
@@ -1505,7 +1603,10 @@ async function viewPreequipoLista(v) {
   const esAdmin = state.profile.rol === "admin";
   const filtro = state.preFiltro || "candidato";
 
-  const { data: alumnos, error } = await supa.from("preequipo_alumnos").select("*").order("nombre");
+  const [{ data: alumnos, error }] = await Promise.all([
+    supa.from("preequipo_alumnos").select("*").order("nombre"),
+    cargarNotificaciones(),   // avisos al día para el globito 💬
+  ]);
   if (error) throw error;
 
   // % del mejor registro por alumno, en la etapa que le corresponde
@@ -1554,7 +1655,7 @@ async function viewPreequipoLista(v) {
         : (a.estado === "preequipo" && apto) ? `<span class="badge ok">✓ Listo para el equipo</span>` : "";
       return `<div class="alumno" data-id="${a.id}">
         <div class="ava">${esc(iniciales(a.nombre))}</div>
-        <div class="info"><b>${esc(a.nombre)}</b>
+        <div class="info"><b>${esc(a.nombre)}</b> ${globoMsj(noLeidosMsj("pre_alumno_id", a.id))}
           <div class="small muted">${a.edad ? a.edad + " años · " : ""}${(obsMap[a.id] || []).filter((o) => o.etapa === et).length} obs. ${marca}</div>
         </div>
         <div class="pct"><div class="n">${pct == null ? "—" : pct + "%"}</div>
@@ -1739,7 +1840,9 @@ async function viewPreequipoFicha(v) {
         : `<p class="muted">Todavía no hay observaciones en esta instancia.</p>`}
     </div>
 
-    ${acciones ? `<div class="card no-print"><div class="row">${acciones}</div></div>` : ""}
+    <div id="chat-cont"></div>
+
+    ${acciones ?`<div class="card no-print"><div class="row">${acciones}</div></div>` : ""}
     <div class="no-print" style="text-align:center;margin-top:10px">
       <button class="btn ghost sm" id="btn-pre-editar">✏️ Editar datos</button>
       <button class="btn danger sm" id="btn-pre-eliminar">🗑 Eliminar</button>
@@ -1784,6 +1887,10 @@ async function viewPreequipoFicha(v) {
       if (error) { toast(error.message, "err"); return; }
       cerrarModal(); toast("Observación eliminada", "ok"); render();
     })));
+
+  // Chat con el coordinador de pre-equipo / admin, y deep-link si vengo de una notificación
+  await montarChat($("#chat-cont"), { preId: id });
+  saltarAncla();
 }
 
 function modalVerPreObs(o) {
